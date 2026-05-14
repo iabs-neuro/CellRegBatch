@@ -71,7 +71,7 @@ Files not matching the regex are listed under "unparsed" in the GUI Setup tab bu
 | Stage | Change |
 |-------|--------|
 | 1 — load | use `prepare_session_files` instead of `load_multiple_sessions`. |
-| 2 — align | fixed `alignment_type='Translations'` by default (configurable); record `alignment_translations`, `maximal_cross_correlation`. |
+| 2 — align | fixed `alignment_type='Translations and Rotations'` by default (configurable); record `alignment_translations`, `maximal_cross_correlation`. |
 | 3 — model | record `MSE_*_model`, `false_positive_per_*_threshold`, `p_same_centers_of_bins`. |
 | 3 → 4 — `P_same` selection | call `choose_p_same_by_fpr` (see §5). |
 | 4 — initial reg | unchanged. |
@@ -190,7 +190,7 @@ At GUI startup, `<input>/Matching/_batch_config.json` is loaded if present, othe
   "version": 1,
   "cellreg": {
     "microns_per_pixel": 1.6,
-    "alignment_type": "Translations",
+    "alignment_type": "Translations and Rotations",
     "maximal_rotation": 5,
     "reference_session_index": 1,
     "maximal_distance_um": 30,

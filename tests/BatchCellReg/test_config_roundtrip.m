@@ -6,7 +6,7 @@ function test_defaults_have_expected_keys(testCase)
     cfg = batch_default_config();
     verifyEqual(testCase, cfg.version, 1);
     verifyEqual(testCase, cfg.cellreg.microns_per_pixel, 1.6);
-    verifyEqual(testCase, cfg.cellreg.alignment_type, 'Translations');
+    verifyEqual(testCase, cfg.cellreg.alignment_type, 'Translations and Rotations');
     verifyEqual(testCase, cfg.cellreg.maximal_rotation, 5);
     verifyEqual(testCase, cfg.cellreg.reference_session_index, 1);
     verifyEqual(testCase, cfg.cellreg.maximal_distance_um, 30);

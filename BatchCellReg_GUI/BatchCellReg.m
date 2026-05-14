@@ -222,5 +222,112 @@ function refresh_param_fields(fig)
 end
 
 function build_run_tab(app)
-    uitab(app.tabs, 'Title', 'Run & Results');  % implemented in Task 14
+    t = uitab(app.tabs, 'Title', 'Run & Results');
+
+    uibutton(t, 'Position', [20 540 80 24], 'Text', 'Run batch', ...
+        'ButtonPushedFcn', @(s,e) on_run(app.fig));
+    uibutton(t, 'Position', [110 540 80 24], 'Text', 'Stop', ...
+        'ButtonPushedFcn', @(s,e) on_stop(app.fig));
+    app.ui.progress_label = uilabel(t, 'Position', [200 540 400 24], 'Text', 'idle');
+
+    app.ui.log_area = uitextarea(t, 'Position', [20 320 840 200], 'Editable', 'off');
+
+    app.ui.results_table = uitable(t, 'Position', [20 80 840 230], ...
+        'ColumnName', {'Dataset','Sess','Cells','%match','FPR', ...
+                       'W1','W2','W3a','W3b','W4','W5a','W5b','W6a','W6b'}, ...
+        'ColumnFormat', {'char','numeric','numeric','numeric','numeric', ...
+                         'logical','logical','logical','logical','logical', ...
+                         'logical','logical','logical','logical'});
+
+    uibutton(t, 'Position', [20 30 160 24], 'Text', 'Export results CSV', ...
+        'ButtonPushedFcn', @(s,e) on_export(app.fig, 'results'));
+    uibutton(t, 'Position', [190 30 160 24], 'Text', 'Export log TXT', ...
+        'ButtonPushedFcn', @(s,e) on_export(app.fig, 'log'));
+    uibutton(t, 'Position', [360 30 160 24], 'Text', 'Open output folder', ...
+        'ButtonPushedFcn', @(s,e) on_open_out(app.fig));
+
+    save_app(app);
+    setappdata(app.fig, 'stop_requested', false);
+end
+
+function on_run(fig)
+    app = getappdata(fig, 'app');
+    folder = app.ui.input_edit.Value;
+    if isempty(folder); uialert(fig, 'Choose an input folder first.', 'Run'); return; end
+    setappdata(fig, 'stop_requested', false);
+
+    selected = {};
+    if ~isempty(app.ui.datasets_table.Data)
+        rows = app.ui.datasets_table.Data;
+        for k = 1:size(rows, 1)
+            if rows{k, 1}; selected{end+1} = rows{k, 2}; end %#ok<AGROW>
+        end
+    end
+
+    opts = struct();
+    opts.live_log_callback = @(msg) append_log(fig, msg);
+    opts.stop_check = @() getappdata(fig, 'stop_requested');
+    opts.selected_datasets = selected;
+
+    app.ui.progress_label.Text = 'running...';
+    drawnow;
+    summary = batch_run(folder, app.config, opts);
+    app.ui.progress_label.Text = sprintf('done: %d ok, %d failed, %d warned', ...
+        summary.n_succeeded, summary.n_failed, summary.n_with_warnings);
+
+    app = getappdata(fig, 'app');
+    app.last_summary = summary;
+    setappdata(fig, 'app', app);
+    fill_results_table(fig, summary);
+end
+
+function on_stop(fig)
+    setappdata(fig, 'stop_requested', true);
+end
+
+function append_log(fig, msg)
+    app = getappdata(fig, 'app');
+    cur = app.ui.log_area.Value;
+    if ischar(cur); cur = {cur}; end
+    cur{end+1} = msg;
+    if numel(cur) > 500; cur = cur(end-499:end); end
+    app.ui.log_area.Value = cur;
+    drawnow;
+end
+
+function fill_results_table(fig, summary)
+    app = getappdata(fig, 'app');
+    n = numel(summary.results);
+    rows = cell(n, 14);
+    for k = 1:n
+        r = summary.results(k); f = summary.anomalies.flags(k);
+        if numel(r.match_stats) >= 2; pct = r.match_stats(2)/max(r.match_stats(1),1);
+        else; pct = NaN; end
+        rows(k, :) = {r.dataset_id, numel(r.sessions), r.match_stats(1), pct, r.chosen_fpr, ...
+            f.W1, f.W2, f.W3a, f.W3b, f.W4, f.W5a, f.W5b, f.W6a, f.W6b};
+    end
+    app.ui.results_table.Data = rows;
+end
+
+function on_export(fig, which)
+    app = getappdata(fig, 'app');
+    if ~isfield(app, 'last_summary')
+        uialert(fig, 'No run results yet.', 'Export'); return;
+    end
+    if strcmp(which, 'results')
+        [n, p] = uiputfile('*.csv', 'Save results', '_batch_results.csv');
+        if isnumeric(n); return; end
+        copyfile(app.last_summary.results_csv, fullfile(p, n));
+    else
+        [n, p] = uiputfile('*.txt', 'Save log', '_batch_log.txt');
+        if isnumeric(n); return; end
+        copyfile(app.last_summary.log_file, fullfile(p, n));
+    end
+end
+
+function on_open_out(fig)
+    app = getappdata(fig, 'app');
+    if isfield(app, 'last_summary')
+        winopen(app.last_summary.output_dir);
+    end
 end

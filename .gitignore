@@ -4,3 +4,8 @@
 *.fig
 /SampleData/Results/*
 /SampleData/Figures/*
+
+# Batch wrapper output and test fixtures
+**/Matching/
+tests/BatchCellReg/fixtures/flat_folder/
+tests/BatchCellReg/fixtures/tiny_sessions/

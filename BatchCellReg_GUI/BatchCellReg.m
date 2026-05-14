@@ -96,9 +96,9 @@ function build_parameters_tab(app)
     y = add_num (t, 'Maximal rotation (deg)',  'cellreg.maximal_rotation',        y);
     y = add_num (t, 'Reference session',       'cellreg.reference_session_index', y);
     y = add_num (t, 'Maximal distance (um)',   'cellreg.maximal_distance_um',     y);
-    y = add_drop(t, 'Registration approach',   'cellreg.registration_approach',   y, ...
+    y = add_drop_disabled(t, 'Registration approach',   'cellreg.registration_approach',   y, ...
                  {'Probabilistic','Simple threshold'});
-    y = add_drop(t, 'Initial registration',    'cellreg.initial_registration_type', y, ...
+    y = add_drop_disabled(t, 'Initial registration',    'cellreg.initial_registration_type', y, ...
                  {'auto','Spatial correlation','Centroid distance'});
 
     y = section_header(t, 'P_same auto-tune', y);
@@ -151,6 +151,17 @@ function y = add_drop(t, label, path, y, items)
     f = uidropdown(t, 'Position', [250 y 200 22], 'Items', items);
     f.Tag = path;
     f.ValueChangedFcn = @(s,e) set_path(ancestor(s, 'figure'), path, s.Value);
+    sync_field_from_config(f);
+    y = y - 26;
+end
+
+function y = add_drop_disabled(t, label, path, y, items)
+    uilabel(t, 'Position', [20 y 220 22], 'Text', label);
+    f = uidropdown(t, 'Position', [250 y 200 22], 'Items', items);
+    f.Tag = path;
+    f.ValueChangedFcn = @(s,e) set_path(ancestor(s, 'figure'), path, s.Value);
+    f.Enable = 'off';
+    f.Tooltip = 'Fixed in v1: GUI control reserved for future use';
     sync_field_from_config(f);
     y = y - 26;
 end

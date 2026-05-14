@@ -246,7 +246,7 @@ At GUI startup, `<input>/Matching/_batch_config.json` is loaded if present, othe
 
 Each line: `[HH:MM:SS] <dataset_id|GLOBAL>: <text>`. Levels `INFO`, `WARN`, `ERROR`.
 
-Vendor `disp` output is captured via `evalc` per stage and written to the file log only (not the live log) to keep the GUI readable.
+Vendor `disp` output is allowed to print to the MATLAB Command Window; future work may capture it via per-stage `evalc` if needed.
 
 ### Error strategy
 

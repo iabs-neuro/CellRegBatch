@@ -35,11 +35,14 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
 
     sufficient_corr_centroids  = 0.2;
     sufficient_corr_footprints = 0.3;
-    % Note: vendor align_images has inverted logic for use_parallel_processing in its
-    % rotation block (false triggers parfor; true triggers a plain for loop).  Passing
-    % true here matches demo.m's default and avoids a parallel-pool bootstrap error
-    % when the rotation path is taken.  Pool teardown is still controlled by
-    % cfg.cellreg.use_parallel_processing via batch_run.
+    % Note: vendor align_images has a real bug in its spatial-footprint rotation block
+    % (CellReg/align_images.m lines ~349-366): the branch on use_parallel_processing
+    % is inverted — `if use_parallel_processing` runs a plain `for`, while the `else`
+    % branch runs `parfor`. When this code path is hit on a session that actually needs
+    % rotation (abs(best_rotation) > minimal_rotation) AND no parallel pool exists,
+    % the parfor in the else branch errors during pool bootstrap. Passing `true` here
+    % matches demo.m's default and keeps the bug dormant for both use_parallel values.
+    % The cell-rotation parfor at line ~349 will then run, which is benign.
     if strcmp(alignment_type, 'Translations and Rotations')
         [sfp_c, cl_c, fpr_c, cp_c, max_xcorr, alignment_translations, overlapping_FOV] = ...
             align_images(adjusted_spatial_footprints, centroid_locations, ...
@@ -156,18 +159,20 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
     crs.adjustment_x_zero_padding = adj_pad(1, :);
     crs.adjustment_y_zero_padding = adj_pad(2, :);
 
-    stamp = datestr(clock, 'yyyymmdd_HHMMss');
-    save(fullfile(out_subdir, ['cellRegistered_' stamp '.mat']), 'crs', '-v7.3');
-    if strcmp(best_model, 'Spatial correlation')
-        save_log_file(out_subdir, file_paths, microns_per_pixel, ax, ay, ...
-            alignment_type, ref_idx, max_dist, n_bins, best_model, init_thresh, ...
-            'Probabilistic', best_model, p_same_thr, opt_map, crs, '', ...
-            unc_sc, fpr_sc, tpr_sc, MSE_sc);
-    else
-        save_log_file(out_subdir, file_paths, microns_per_pixel, ax, ay, ...
-            alignment_type, ref_idx, max_dist, n_bins, best_model, init_thresh, ...
-            'Probabilistic', best_model, p_same_thr, opt_map, crs, '', ...
-            unc_cd, fpr_cd, tpr_cd, MSE_cd);
+    stamp = datestr(now, 'yyyymmdd_HHMMss');
+    if cfg.cellreg.write_to_file
+        save(fullfile(out_subdir, ['cellRegistered_' stamp '.mat']), 'crs', '-v7.3');
+        if strcmp(best_model, 'Spatial correlation')
+            save_log_file(out_subdir, file_paths, microns_per_pixel, ax, ay, ...
+                alignment_type, ref_idx, max_dist, n_bins, best_model, init_thresh, ...
+                'Probabilistic', best_model, p_same_thr, opt_map, crs, '', ...
+                unc_sc, fpr_sc, tpr_sc, MSE_sc);
+        else
+            save_log_file(out_subdir, file_paths, microns_per_pixel, ax, ay, ...
+                alignment_type, ref_idx, max_dist, n_bins, best_model, init_thresh, ...
+                'Probabilistic', best_model, p_same_thr, opt_map, crs, '', ...
+                unc_cd, fpr_cd, tpr_cd, MSE_cd);
+        end
     end
 
     % --- result for anomaly detector ---

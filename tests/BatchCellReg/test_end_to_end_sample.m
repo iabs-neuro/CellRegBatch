@@ -26,12 +26,15 @@ function test_runs_on_sample_data_our(testCase)
     summary = batch_run(out, cfg);
 
     % The batch must attempt at least one dataset (n_succeeded + n_failed >= 1).
-    % SampleDataOur/BOWL_D01 session 2 cannot be aligned to the reference even
-    % with rotations (vendor warns "does not resemble the reference session").
-    % The wrapper records such datasets as failed so that the batch continues
-    % cleanly, meaning n_succeeded may be 0 for this specific test corpus.
-    % We therefore verify that the runner completed end-to-end without an
-    % unhandled exception and produced the required output artefacts.
+    % SampleDataOur/BOWL_D01 session 2 cannot be aligned to the reference: its
+    % cross-correlation with session 1 stays below
+    % sufficient_correlation_footprints (0.3) for every rotation, so vendor
+    % align_images marks it failed and our wrapper raises BatchCellReg:AlignmentFailed.
+    % The wrapper records such datasets as failed so batch processing continues,
+    % which means n_succeeded may be 0 for this specific test corpus. We therefore
+    % verify that the runner completed end-to-end without an unhandled exception
+    % and produced the required output artefacts. Future smoke tests that include
+    % alignable datasets should tighten this to verifyGreaterThan(n_succeeded, 0).
     verifyGreaterThan(testCase, summary.n_succeeded + summary.n_failed, 0);
     verifyTrue(testCase, exist(summary.results_csv, 'file') == 2);
     verifyTrue(testCase, exist(summary.log_file, 'file') == 2);

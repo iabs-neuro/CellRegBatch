@@ -2072,4 +2072,19 @@ git commit -m "feat(batch-gui): Run & Results tab with live log, table, exports"
 | §10.3 stop button | 10, 14 |
 | §10.4 pool cleanup | 10 |
 
+---
+
+## Revision R1–R4 (2026-05-15)
+
+The original task list above describes the baseline implementation. Four revisions were applied after the initial merge; they are captured here so the plan reflects the implemented state.
+
+| Rev | Commit | Summary |
+|-----|--------|---------|
+| R1 | `4dd8365` | P_same rule changed: prefer 0.5, ascend to 0.95 + set `unreachable` flag. Defaults recalibrated: `maximal_distance_um=15`, `alignment_type='Translations'`, `max_mse=0.1`. Four new cfg fields added: `alignment_min_xcorr=0.3`, `expected_n_sessions=5`, `rotation_fallback_deg=90`, `nonrigid_smoothness=2`. |
+| R2 | `d593879` | Anomaly severity: all flags changed from boolean to 0/1/2 severity codes. New checks: W2b_hard (cells-per-session max/min ratio > 3 → binary red) and W2b_rel (batch-distribution of ratio, graded). `batch_severity` and `quantile_safe` helpers added to `detect_anomalies.m`. |
+| R3 | `4d9093b` | Alignment fallback cascade: `run_single_dataset` tries Translations → Rotations@5° → Rotations@90° → Non-rigid in order, stopping at first success. Failure criteria: empty aligned footprints OR `max_xcorr < alignment_min_xcorr` OR vendor error. All-fail raises `BatchCellReg:AlignmentFailed`. `result.alignment_mode` records the winning stage. |
+| R4 | `0ccd056` | W7 session-count flag (binary red when `numel(sessions) != expected_n_sessions`). `batch_run` passes `expected_n_sessions` into `detect_anomalies` thresh. CSV export and GUI table updated to include W2b_hard, W2b_rel, W7 (table is now 17 W-columns). GUI applies `uistyle` severity coloring (red=2, yellow=1). |
+
+All 28 unit tests pass after R1–R4. Spec doc synced in commit following this revision note.
+
 End-to-end coverage on real data: Task 11.

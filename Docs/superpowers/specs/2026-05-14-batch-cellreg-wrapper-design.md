@@ -71,7 +71,7 @@ Files not matching the regex are listed under "unparsed" in the GUI Setup tab bu
 | Stage | Change |
 |-------|--------|
 | 1 — load | use `prepare_session_files` instead of `load_multiple_sessions`. |
-| 2 — align | fixed `alignment_type='Translations and Rotations'` by default (configurable); record `alignment_translations`, `maximal_cross_correlation`. |
+| 2 — align | default `alignment_type='Translations'` with a fallback cascade (see §11 / R3); record `alignment_translations`, `maximal_cross_correlation`. |
 | 3 — model | record `MSE_*_model`, `false_positive_per_*_threshold`, `p_same_centers_of_bins`. |
 | 3 → 4 — `P_same` selection | call `choose_p_same_by_fpr` (see §5). |
 | 4 — initial reg | unchanged. |
@@ -99,19 +99,15 @@ result.error                          (empty on success; message on failure)
 
 ## 5. Auto P_same selection
 
-`fpr_vector` (either `false_positive_per_correlation_threshold` or `false_positive_per_distance_threshold`, depending on `best_model_string`) is monotonically non-increasing in `p_same`. Selection is a single pass:
+`fpr_vector` (either `false_positive_per_correlation_threshold` or `false_positive_per_distance_threshold`, depending on `best_model_string`) is monotonically non-increasing in `p_same`. Selection rule:
 
-```matlab
-idx = find(fpr_vector <= fpr_max, 1, 'first');
-if isempty(idx)
-    [~, idx] = min(fpr_vector);   % closest achievable
-    unreachable = true;
-else
-    unreachable = false;
-end
-p_same = p_same_centers_of_bins(idx);
-fpr    = fpr_vector(idx);
-```
+1. **Default P_same = 0.5.** Find the bin whose center is nearest 0.5 (`i50`).
+2. If `FPR(i50) <= fpr_max` → return that bin. `unreachable = false`.
+3. Otherwise **ascend**: among bins with center > `centers(i50)` and center ≤ 0.95, find the smallest center whose FPR ≤ `fpr_max`.
+   - If found → return it. `unreachable = false`.
+   - If not found → return the bin nearest 0.95. `unreachable = true`.
+
+The cap at 0.95 prevents the algorithm from drifting into the near-1 region where the same/different populations are trivially separated but biologically meaningless thresholds result.
 
 Default `fpr_max = 0.03`, configurable in GUI.
 
@@ -128,10 +124,10 @@ Default `fpr_max = 0.03`, configurable in GUI.
 | W4 | FPR unreachable | `p_same_unreachable == true` | flag, no extra threshold |
 | W5a | large alignment shift (hard) | `max(abs(translation_xy))` in px per session | `> max_translation_px` (default 30) |
 | W5b | large alignment shift (relative) | z-score of per-session shift magnitude within own dataset, **excluding reference session** (shift is 0 by construction) | `abs(z) > z_threshold` |
-| W6a | bad model fit (hard) | `MSE_model` | `> max_mse` (default 0.05) |
+| W6a | bad model fit (hard) | `MSE_model` | `> max_mse` (default 0.1) |
 | W6b | bad model fit (relative) | z-score of `MSE_model` across batch | `abs(z) > z_threshold` |
 
-Rationale for `max_mse = 0.05`: CellReg MSE is the sum of squared deviations between the normalized empirical histogram and the modelled weighted sum (per `compute_*_model.m`). Realistic datasets land at ~0.001–0.01; the vendor `choose_best_model.m` ranks models by MSE but has no absolute threshold. `0.05` is a generous ceiling above which the same/different mixture clearly failed to separate, while the relative `z > 2` check catches dataset-specific drift.
+Rationale for `max_mse = 0.1`: CellReg MSE is the sum of squared deviations between the normalized empirical histogram and the modelled weighted sum (per `compute_*_model.m`). Manual inspection of a 39-dataset corpus shows healthy datasets cluster in the 0.05–0.11 range; `0.1` is the recalibrated hard backstop above which the same/different mixture has clearly failed to separate. The relative `z > 2` check (W6b) across the batch remains the primary signal for dataset-specific drift and is unaffected by this threshold.
 
 All thresholds are surfaced in the GUI Parameters tab and serialized into `_batch_config.json`.
 
@@ -190,15 +186,19 @@ At GUI startup, `<input>/Matching/_batch_config.json` is loaded if present, othe
   "version": 1,
   "cellreg": {
     "microns_per_pixel": 1.6,
-    "alignment_type": "Translations and Rotations",
+    "alignment_type": "Translations",
     "maximal_rotation": 5,
     "reference_session_index": 1,
-    "maximal_distance_um": 30,
+    "maximal_distance_um": 15,
     "registration_approach": "Probabilistic",
     "initial_registration_type": "auto",
     "use_parallel_processing": true,
     "figures_visibility": "off",
-    "write_to_file": true
+    "write_to_file": true,
+    "alignment_min_xcorr": 0.3,
+    "expected_n_sessions": 5,
+    "rotation_fallback_deg": 90,
+    "nonrigid_smoothness": 2
   },
   "p_same_tuning": {
     "fpr_max": 0.03
@@ -207,7 +207,7 @@ At GUI startup, `<input>/Matching/_batch_config.json` is loaded if present, othe
     "z_threshold": 2.0,
     "max_translation_px": 30,
     "min_xcorr": 0.3,
-    "max_mse": 0.05
+    "max_mse": 0.1
   },
   "io": {
     "input_folder": "...",

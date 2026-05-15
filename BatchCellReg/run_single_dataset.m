@@ -35,48 +35,121 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
 
     sufficient_corr_centroids  = 0.2;
     sufficient_corr_footprints = 0.3;
+
+    % --- 4-stage alignment fallback cascade ---
     % Note: vendor align_images has a real bug in its spatial-footprint rotation block
     % (CellReg/align_images.m lines ~349-366): the branch on use_parallel_processing
     % is inverted — `if use_parallel_processing` runs a plain `for`, while the `else`
     % branch runs `parfor`. When this code path is hit on a session that actually needs
     % rotation (abs(best_rotation) > minimal_rotation) AND no parallel pool exists,
-    % the parfor in the else branch errors during pool bootstrap. Passing `true` here
-    % matches demo.m's default and keeps the bug dormant for both use_parallel values.
-    % The cell-rotation parfor at line ~349 will then run, which is benign.
-    if strcmp(alignment_type, 'Translations and Rotations')
-        [sfp_c, cl_c, fpr_c, cp_c, max_xcorr, alignment_translations, overlapping_FOV] = ...
-            align_images(adjusted_spatial_footprints, centroid_locations, ...
-                adjusted_footprints_projections, centroid_projections, adjusted_FOV, ...
-                microns_per_pixel, ref_idx, alignment_type, ...
-                sufficient_corr_centroids, sufficient_corr_footprints, true, max_rot);
-    else
-        [sfp_c, cl_c, fpr_c, cp_c, max_xcorr, alignment_translations, overlapping_FOV] = ...
-            align_images(adjusted_spatial_footprints, centroid_locations, ...
-                adjusted_footprints_projections, centroid_projections, adjusted_FOV, ...
-                microns_per_pixel, ref_idx, alignment_type, ...
-                sufficient_corr_centroids, sufficient_corr_footprints, use_parallel);
+    % the parfor in the else branch errors during pool bootstrap. Passing `true` for
+    % rotation stages matches demo.m's default and keeps the bug dormant.
+    stages = {};
+    stages{end+1} = struct('label', 'Translations', ...
+        'type', 'Translations', 'extra', [], 'par', use_parallel);
+    stages{end+1} = struct('label', sprintf('Translations and Rotations@%g', cfg.cellreg.maximal_rotation), ...
+        'type', 'Translations and Rotations', 'extra', cfg.cellreg.maximal_rotation, 'par', true);
+    stages{end+1} = struct('label', sprintf('Translations and Rotations@%g', cfg.cellreg.rotation_fallback_deg), ...
+        'type', 'Translations and Rotations', 'extra', cfg.cellreg.rotation_fallback_deg, 'par', true);
+    stages{end+1} = struct('label', sprintf('Non-rigid@%g', cfg.cellreg.nonrigid_smoothness), ...
+        'type', 'Non-rigid', 'extra', cfg.cellreg.nonrigid_smoothness, 'par', use_parallel);
+
+    % Determine which stage to start from based on configured alignment_type.
+    switch alignment_type
+        case 'Translations';               start_i = 1;
+        case 'Translations and Rotations'; start_i = 2;
+        case 'Non-rigid';                  start_i = 4;
+        otherwise;                         start_i = 1;
     end
-    % Guard: vendor align_images leaves spatial_footprints_corrected{k} and
-    % footprints_projections_corrected{k} empty for sessions where the
-    % cross-correlation with the reference was too low to compute a valid
-    % alignment.  Downstream stages (evaluate_data_quality corr2 call,
-    % compute_data_distribution, clustering) would crash with opaque errors on
-    % those empty cells.  Detect this early and fail with a clear message so
-    % that batch_run's try/catch can log it and continue with other datasets.
-    failed_sessions = find(cellfun(@isempty, sfp_c));
-    failed_sessions(failed_sessions == ref_idx) = [];  % ref is always filled
-    if ~isempty(failed_sessions)
+
+    won = 0; displacement_fields = []; last_reason = 'none'; won_label = '';
+    sfp_c = {}; cl_c = {}; fpr_c = {}; cp_c = {};
+    max_xcorr = []; alignment_translations = []; overlapping_FOV = [];
+
+    for si = start_i:numel(stages)
+        s = stages{si};
+        logger.info(tag, 'stage 2: trying alignment mode %s', s.label);
+        try
+            if isempty(s.extra)
+                % Translations — no extra arg
+                [sfp_c, cl_c, fpr_c, cp_c, max_xcorr, alignment_translations, overlapping_FOV] = ...
+                    align_images(adjusted_spatial_footprints, centroid_locations, ...
+                        adjusted_footprints_projections, centroid_projections, adjusted_FOV, ...
+                        microns_per_pixel, ref_idx, s.type, ...
+                        sufficient_corr_centroids, sufficient_corr_footprints, s.par);
+                df = [];
+            elseif strcmp(s.type, 'Non-rigid')
+                % Non-rigid — capture 8th output (displacement_fields)
+                [sfp_c, cl_c, fpr_c, cp_c, max_xcorr, alignment_translations, overlapping_FOV, df] = ...
+                    align_images(adjusted_spatial_footprints, centroid_locations, ...
+                        adjusted_footprints_projections, centroid_projections, adjusted_FOV, ...
+                        microns_per_pixel, ref_idx, s.type, ...
+                        sufficient_corr_centroids, sufficient_corr_footprints, s.par, s.extra);
+            else
+                % Translations and Rotations — pass maximal_rotation as extra arg
+                [sfp_c, cl_c, fpr_c, cp_c, max_xcorr, alignment_translations, overlapping_FOV] = ...
+                    align_images(adjusted_spatial_footprints, centroid_locations, ...
+                        adjusted_footprints_projections, centroid_projections, adjusted_FOV, ...
+                        microns_per_pixel, ref_idx, s.type, ...
+                        sufficient_corr_centroids, sufficient_corr_footprints, s.par, s.extra);
+                df = [];
+            end
+
+            % --- Per-stage failure test ---
+            % Check for empty corrected sessions (excluding reference).
+            fe = find(cellfun(@isempty, sfp_c));
+            fe(fe == ref_idx) = [];
+            % Check for low cross-correlation in non-reference sessions.
+            % max_xcorr is a vector of length (n_sessions-1); it does NOT include
+            % the reference entry, so we do NOT drop ref_idx from it.
+            mx = max_xcorr(:)';
+            if numel(mx) == numel(sfp_c)
+                % Defensive: if vendor ever returns a full-length vector, drop ref.
+                mx(ref_idx) = [];
+            end
+            low = any(mx < cfg.cellreg.alignment_min_xcorr);
+
+            if ~isempty(fe) || low
+                last_reason = sprintf('empty=%s lowxcorr=%d', mat2str(fe), low);
+                logger.warn(tag, 'stage 2: mode %s failed (%s), trying next', s.label, last_reason);
+                continue
+            end
+
+            % Stage succeeded.
+            won = si;
+            displacement_fields = df;
+            alignment_type = s.type;   % effective mode for downstream branches
+            won_label = s.label;
+            logger.info(tag, 'stage 2: alignment OK with %s', s.label);
+            break
+
+        catch ME
+            last_reason = ME.message;
+            logger.warn(tag, 'stage 2: mode %s errored (%s), trying next', s.label, ME.message);
+            continue
+        end
+    end
+
+    if won == 0
         error('BatchCellReg:AlignmentFailed', ...
-            'Sessions %s could not be aligned to the reference (cross-correlation too low). Consider non-rigid alignment.', ...
-            num2str(failed_sessions));
+            'All alignment modes failed for %s (Translations, Rotations@%g, Rotations@%g, Non-rigid). Last: %s', ...
+            dataset.dataset_id, cfg.cellreg.maximal_rotation, cfg.cellreg.rotation_fallback_deg, last_reason);
     end
+
     [all_proj_corr, n_cells_per_session] = evaluate_data_quality( ...
         sfp_c, cp_c, fpr_c, max_xcorr, alignment_translations, ref_idx, ...
         sufficient_corr_footprints, alignment_type);
-    plot_alignment_results(adjusted_spatial_footprints, centroid_locations, sfp_c, cl_c, ...
-        adjusted_footprints_projections, fpr_c, ref_idx, all_proj_corr, max_xcorr, ...
-        alignment_translations, overlapping_FOV, alignment_type, n_cells_per_session, ...
-        figures_dir, fig_vis);
+    if strcmp(alignment_type, 'Non-rigid')
+        plot_alignment_results(adjusted_spatial_footprints, centroid_locations, sfp_c, cl_c, ...
+            adjusted_footprints_projections, fpr_c, ref_idx, all_proj_corr, max_xcorr, ...
+            alignment_translations, overlapping_FOV, alignment_type, n_cells_per_session, ...
+            figures_dir, fig_vis, displacement_fields);
+    else
+        plot_alignment_results(adjusted_spatial_footprints, centroid_locations, sfp_c, cl_c, ...
+            adjusted_footprints_projections, fpr_c, ref_idx, all_proj_corr, max_xcorr, ...
+            alignment_translations, overlapping_FOV, alignment_type, n_cells_per_session, ...
+            figures_dir, fig_vis);
+    end
 
     logger.info(tag, 'stage 3: probabilistic model');
     [n_bins, centers_of_bins] = estimate_number_of_bins(spatial_footprints, norm_max_dist);
@@ -193,5 +266,6 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
     result.chosen_p_same = p_same_thr;
     result.chosen_fpr = chosen_fpr;
     result.p_same_unreachable = p_same_unreachable;
+    result.alignment_mode = won_label;
     result.error = '';
 end

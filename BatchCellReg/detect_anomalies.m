@@ -16,12 +16,12 @@ function out = detect_anomalies(results, thresh)
         'W1',    0, 'W2',    0, 'W2b_hard', 0, 'W2b_rel', 0, ...
         'W3a',   0, 'W3b',   0, 'W4',       0, ...
         'W5a',   0, 'W5b',   0, ...
-        'W6a',   0, 'W6b',   0);
+        'W6a',   0, 'W6b',   0, 'W7',       0);
     flags = repmat(flags_template, 1, n);
     metrics = repmat(struct( ...
         'W3a_min_xcorr', NaN, 'W5a_max_shift', NaN, ...
         'W6a_mse', NaN, 'fpr', NaN, 'pct_in_all', NaN, ...
-        'W2b_ratio', NaN), 1, n);
+        'W2b_ratio', NaN, 'n_sessions', NaN), 1, n);
 
     succeeded = arrayfun(@(r) isempty(r.error), results);
 
@@ -41,10 +41,11 @@ function out = detect_anomalies(results, thresh)
         else
             ratio_vec(k) = max(nc) / mn;
         end
-        metrics(k).pct_in_all = pct_in_all_vec(k);
-        metrics(k).W6a_mse    = r.MSE_model;
-        metrics(k).fpr        = r.chosen_fpr;
-        metrics(k).W2b_ratio  = ratio_vec(k);
+        metrics(k).pct_in_all  = pct_in_all_vec(k);
+        metrics(k).W6a_mse     = r.MSE_model;
+        metrics(k).fpr         = r.chosen_fpr;
+        metrics(k).W2b_ratio   = ratio_vec(k);
+        metrics(k).n_sessions  = numel(r.sessions);
     end
 
     z = thresh.z_threshold;
@@ -122,6 +123,11 @@ function out = detect_anomalies(results, thresh)
         % W6b: batch-distribution check (bad=HIGH), needs >=3
         if ns >= 3
             flags(k).W6b = batch_severity(mse_vec(succeeded), mse_vec(k), true, z);
+        end
+
+        % --- W7: session-count mismatch (binary red) ---
+        if isfield(thresh, 'expected_n_sessions') && numel(r.sessions) ~= thresh.expected_n_sessions
+            flags(k).W7 = 2;
         end
     end
 

@@ -245,10 +245,10 @@ function build_run_tab(app)
 
     app.ui.results_table = uitable(t, 'Position', [20 80 840 230], ...
         'ColumnName', {'Dataset','Sess','Cells','%match','FPR', ...
-                       'W1','W2','W3a','W3b','W4','W5a','W5b','W6a','W6b'}, ...
+                       'W1','W2','W2b_h','W2b_r','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'}, ...
         'ColumnFormat', {'char','numeric','numeric','numeric','numeric', ...
-                         'logical','logical','logical','logical','logical', ...
-                         'logical','logical','logical','logical'});
+                         'numeric','numeric','numeric','numeric','numeric','numeric', ...
+                         'numeric','numeric','numeric','numeric','numeric','numeric'});
 
     uibutton(t, 'Position', [20 30 160 24], 'Text', 'Export results CSV', ...
         'ButtonPushedFcn', @(s,e) on_export(app.fig, 'results'));
@@ -309,15 +309,33 @@ end
 function fill_results_table(fig, summary)
     app = getappdata(fig, 'app');
     n = numel(summary.results);
-    rows = cell(n, 14);
+    rows = cell(n, 17);
     for k = 1:n
         r = summary.results(k); f = summary.anomalies.flags(k);
         if numel(r.match_stats) >= 2; pct = r.match_stats(2)/max(r.match_stats(1),1);
         else; pct = NaN; end
         rows(k, :) = {r.dataset_id, numel(r.sessions), r.match_stats(1), pct, r.chosen_fpr, ...
-            f.W1, f.W2, f.W3a, f.W3b, f.W4, f.W5a, f.W5b, f.W6a, f.W6b};
+            f.W1, f.W2, f.W2b_hard, f.W2b_rel, f.W3a, f.W3b, f.W4, f.W5a, f.W5b, f.W6a, f.W6b, f.W7};
     end
     app.ui.results_table.Data = rows;
+    % Apply severity coloring: red=2, yellow=1 for W columns (cols 6-17)
+    try
+        removeStyle(app.ui.results_table);
+        redS = uistyle('BackgroundColor', [1 0.6 0.6]);
+        yelS = uistyle('BackgroundColor', [1 1 0.6]);
+        wcols = 6:17;
+        for rr = 1:size(rows, 1)
+            for cc = wcols
+                v = rows{rr, cc};
+                if isequal(v, 2)
+                    addStyle(app.ui.results_table, redS, 'cell', [rr cc]);
+                elseif isequal(v, 1)
+                    addStyle(app.ui.results_table, yelS, 'cell', [rr cc]);
+                end
+            end
+        end
+    catch
+    end
 end
 
 function on_export(fig, which)

@@ -61,7 +61,9 @@ function summary = batch_run(input_folder, cfg, opts)
         results = [results, normalize_result(r)]; %#ok<AGROW>
     end
 
-    anomalies = detect_anomalies(results, cfg.anomaly_thresholds);
+    at = cfg.anomaly_thresholds;
+    at.expected_n_sessions = cfg.cellreg.expected_n_sessions;
+    anomalies = detect_anomalies(results, at);
 
     [results_csv, detail_csv] = export_results(results, anomalies, output_dir);
 
@@ -122,40 +124,49 @@ function [results_csv, detail_csv] = export_results(results, anomalies, output_d
 
     rows = {};
     rows(end+1, :) = {'dataset_id', 'n_sessions', 'n_cells', 'pct_in_all', 'chosen_fpr', ...
-        'W1','W2','W3a','W3b','W4','W5a','W5b','W6a','W6b', ...
-        'W3a_min_xcorr', 'W5a_max_shift_px', 'W6a_mse', 'error'};
+        'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7', ...
+        'W3a_min_xcorr', 'W5a_max_shift_px', 'W6a_mse', 'W2b_ratio', 'error'};
     for k = 1:numel(results)
         r = results(k);
         f = anomalies.flags(k); m = anomalies.metrics(k);
         rows(end+1, :) = { ...
             r.dataset_id, numel(r.sessions), maybe_first(r.match_stats), ...
             ratio(r.match_stats), r.chosen_fpr, ...
-            f.W1, f.W2, f.W3a, f.W3b, f.W4, f.W5a, f.W5b, f.W6a, f.W6b, ...
-            m.W3a_min_xcorr, m.W5a_max_shift, m.W6a_mse, r.error}; %#ok<AGROW>
+            f.W1, f.W2, f.W2b_hard, f.W2b_rel, f.W3a, f.W3b, f.W4, f.W5a, f.W5b, f.W6a, f.W6b, f.W7, ...
+            m.W3a_min_xcorr, m.W5a_max_shift, m.W6a_mse, m.W2b_ratio, r.error}; %#ok<AGROW>
     end
     write_cell_csv(rows, results_csv);
 
-    detail = {'dataset_id', 'session', 'anomaly_type', 'value', 'threshold'};
+    detail = {'dataset_id', 'session', 'anomaly_type', 'value', 'threshold', 'severity'};
     for k = 1:numel(results)
         r = results(k); f = anomalies.flags(k); m = anomalies.metrics(k);
         if ~isempty(r.error); continue; end
-        if f.W3a
+        if f.W3a >= 1
             [v, idx] = min(r.maximal_cross_correlation(:));
-            detail(end+1, :) = {r.dataset_id, sess_at(r, idx), 'W3a_low_xcorr_hard', v, NaN}; %#ok<AGROW>
+            detail(end+1, :) = {r.dataset_id, sess_at(r, idx), 'W3a_low_xcorr_hard', v, NaN, f.W3a}; %#ok<AGROW>
         end
-        if f.W5a
+        if f.W5a >= 1
             shifts = r.alignment_shift_px; shifts(r.reference_session_index) = NaN;
             [v, idx] = max(abs(shifts));
-            detail(end+1, :) = {r.dataset_id, sess_at(r, idx), 'W5a_shift_hard', v, NaN}; %#ok<AGROW>
+            detail(end+1, :) = {r.dataset_id, sess_at(r, idx), 'W5a_shift_hard', v, NaN, f.W5a}; %#ok<AGROW>
         end
-        if f.W4
-            detail(end+1, :) = {r.dataset_id, '-', 'W4_fpr_unreachable', r.chosen_fpr, NaN}; %#ok<AGROW>
+        if f.W4 >= 1
+            detail(end+1, :) = {r.dataset_id, '-', 'W4_fpr_unreachable', r.chosen_fpr, NaN, f.W4}; %#ok<AGROW>
         end
-        if f.W6a
-            detail(end+1, :) = {r.dataset_id, '-', 'W6a_mse_hard', r.MSE_model, NaN}; %#ok<AGROW>
+        if f.W6a >= 1
+            detail(end+1, :) = {r.dataset_id, '-', 'W6a_mse_hard', r.MSE_model, NaN, f.W6a}; %#ok<AGROW>
         end
-        if f.W1
-            detail(end+1, :) = {r.dataset_id, '-', 'W1_pct_match_outlier', m.pct_in_all, NaN}; %#ok<AGROW>
+        if f.W1 >= 1
+            detail(end+1, :) = {r.dataset_id, '-', 'W1_pct_match_outlier', m.pct_in_all, NaN, f.W1}; %#ok<AGROW>
+        end
+        if f.W2b_hard == 2
+            detail(end+1, :) = {r.dataset_id, '-', 'W2b_hard_ratio', m.W2b_ratio, NaN, f.W2b_hard}; %#ok<AGROW>
+        end
+        if f.W2b_rel >= 1
+            detail(end+1, :) = {r.dataset_id, '-', 'W2b_rel', f.W2b_rel, NaN, f.W2b_rel}; %#ok<AGROW>
+        end
+        if f.W7 == 2
+            detail(end+1, :) = {r.dataset_id, '-', 'W7_session_count', m.n_sessions, NaN, f.W7}; %#ok<AGROW>
         end
     end
     write_cell_csv(detail, detail_csv);

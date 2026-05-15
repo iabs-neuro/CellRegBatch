@@ -150,7 +150,27 @@ function test_w6b_red_when_mse_2sigma_high(testCase)
 end
 
 % -------------------------------------------------------------------------
-% Test 9: Relative intra-dataset checks skipped for too-few samples
+% Test 9: W7 session-count mismatch → severity 2; matching count → 0
+% -------------------------------------------------------------------------
+
+function test_w7_session_count_mismatch(testCase)
+    % 4 sessions when expected 5 → W7 = 2
+    sessions4 = {'1D','2D','3D','4D'};
+    rs4 = make_result('S4', sessions4, [10 10 10 10], [10 4 6], [0.5 0.5 0.5 0.5], [0 1 2 3], 0.005, false, 1);
+    thresh = default_thresholds();
+    thresh.expected_n_sessions = 5;
+    a4 = detect_anomalies(rs4, thresh);
+    verifyEqual(testCase, a4.flags.W7, 2);
+
+    % 5 sessions when expected 5 → W7 = 0
+    sessions5 = {'1D','2D','3D','4D','5D'};
+    rs5 = make_result('S5', sessions5, [10 10 10 10 10], [10 4 6], [0.5 0.5 0.5 0.5 0.5], [0 1 2 3 4], 0.005, false, 1);
+    a5 = detect_anomalies(rs5, thresh);
+    verifyEqual(testCase, a5.flags.W7, 0);
+end
+
+% -------------------------------------------------------------------------
+% Test 10: Relative intra-dataset checks skipped for too-few samples
 % -------------------------------------------------------------------------
 
 function test_relative_intra_checks_skipped_few_samples(testCase)

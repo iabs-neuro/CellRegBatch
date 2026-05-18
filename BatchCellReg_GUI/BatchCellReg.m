@@ -271,7 +271,11 @@ function build_run_tab(app)
         'ColumnName', results_table_headers(), ...
         'ColumnFormat', {'char','numeric','numeric','numeric','numeric', ...
                          'numeric','numeric','numeric','numeric','numeric','numeric', ...
-                         'numeric','numeric','numeric','numeric','numeric','numeric'});
+                         'numeric','numeric','numeric','numeric','numeric','numeric'}, ...
+        'CellSelectionCallback', @(s,e) on_results_cell_selected(app.fig, e));
+
+    app.ui.decode_line = uitextarea(t, 'Position', [20 56 840 22], ...
+        'Editable', 'off', 'Value', 'Click a W cell to decode the warning.');
 
     uibutton(t, 'Position', [20 30 160 24], 'Text', 'Export results CSV', ...
         'ButtonPushedFcn', @(s,e) on_export(app.fig, 'results'));
@@ -447,4 +451,32 @@ function fill_results_from_csv(fig, r, full)
     app.loaded_csv_path = full;
     app.ui.progress_label.Text = sprintf('loaded %d rows from %s', n, full);
     setappdata(fig, 'app', app);
+end
+
+function on_results_cell_selected(fig, e)
+    app = getappdata(fig, 'app');
+    if ~isfield(app.ui, 'decode_line'); return; end
+    if isempty(e.Indices)
+        app.ui.decode_line.Value = 'Click a W cell to decode the warning.';
+        return
+    end
+    rr = e.Indices(1); cc = e.Indices(2);
+    wcodes = {'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
+    if cc < 6 || cc > 17
+        app.ui.decode_line.Value = 'Not a warning column.';
+        return
+    end
+    m = anomaly_decode_map();
+    code = wcodes{cc - 5};
+    data = app.ui.results_table.Data;
+    sev = 0; ds = '';
+    if ~isempty(data) && rr <= size(data,1)
+        v = data{rr, cc};
+        if ~isempty(v) && isnumeric(v); sev = v; end
+        if ~isempty(data{rr,1}); ds = data{rr,1}; end
+    end
+    sevw = {'none','YELLOW','RED'};
+    si = max(0, min(2, round(sev))) + 1;
+    app.ui.decode_line.Value = sprintf('%s   [%s] severity = %g (%s)', ...
+        m(code).desc, ds, sev, sevw{si});
 end

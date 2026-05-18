@@ -12,9 +12,12 @@ function c = centers1000()
 end
 
 function f = fpr_at_ref(fpr_vector, p)
-    % Reference re-implementation of the vendor index mapping.
+    % Reference re-implementation of the vendor index mapping, INCLUDING the
+    % save_log_file.m:82 rounding decision_thresh = round(100*p)/100 applied
+    % before the line-94 index. The gate must agree with this exactly.
     v = fpr_vector(:); N = numel(v); cum = cumsum(v);
-    f = cum(max(1, min(N, round(N*(1-p)))));
+    dt = round(100*p)/100;
+    f = cum(max(1, min(N, round(N*(1-dt)))));
 end
 
 function test_keeps_half_when_cumulative_fpr_ok(tc)
@@ -30,12 +33,14 @@ end
 
 function test_ascends_to_min_p_meeting_cumulative_fpr(tc)
     % Uniform density 1e-4: cumulative FPR at p=0.5 = 0.05 > 0.03, so ascend.
-    % Higher p -> lower cumsum index -> lower FPR. Smallest p>0.5 meeting
-    % cum<=0.03 is p=0.700 (index round(1000*(1-0.7))=300, cum=0.03).
+    % Vendor rounds the threshold to 2 decimals before indexing
+    % (save_log_file.m:82), so the smallest center meeting the bound is
+    % p=0.695 -> round to 0.70 -> index round(1000*(1-0.70))=300 -> cum=0.03.
+    % (p=0.694 -> 0.69 -> index 310 -> cum=0.031 > 0.03.)
     ct = centers1000();
     fpr = repmat(1e-4, 1000, 1);
     [p, f, u] = choose_p_same_by_fpr(ct, fpr, 0.03);
-    verifyEqual(tc, p, 0.700, 'AbsTol', 1e-9);
+    verifyEqual(tc, p, 0.695, 'AbsTol', 1e-9);
     verifyEqual(tc, f, fpr_at_ref(fpr, p), 'AbsTol', 1e-12);
     verifyLessThanOrEqual(tc, f, 0.03 + 1e-9);
     verifyFalse(tc, u);
@@ -62,6 +67,26 @@ function test_never_exceeds_095_and_index_guarded(tc)
     verifyLessThanOrEqual(tc, p, 0.95 + 1e-9);
     verifyTrue(tc, u);
     verifyEqual(tc, f, fpr_at_ref(fpr, p), 'AbsTol', 1e-12);
+end
+
+function test_uses_vendor_rounded_threshold_index(tc)
+    % Regression for the residual p-rounding bug: the vendor rounds P_same to
+    % 2 decimals before indexing, so the gate must too. Build fpr so the
+    % selector ascends to a non-0.01 center where the rounded vs unrounded
+    % index give different cumulative FPR; the returned fpr must equal the
+    % ROUNDED-index value (what the logFile actually reports), and must be
+    % the quantity bounded by fpr_max.
+    ct = centers1000();                       % centers(k)=k/1000
+    fpr = repmat(1e-4, 1000, 1);
+    [p, f, u] = choose_p_same_by_fpr(ct, fpr, 0.03);
+    v = fpr(:); N = numel(v); cum = cumsum(v);
+    dt = round(100*p)/100;
+    idx_round   = max(1, min(N, round(N*(1-dt))));
+    f_rounded   = cum(idx_round);
+    verifyEqual(tc, f, f_rounded, 'AbsTol', 1e-12);     % matches vendor bin
+    if ~u
+        verifyLessThanOrEqual(tc, f, 0.03 + 1e-9);      % the bound holds at THAT bin
+    end
 end
 
 function test_matches_vendor_formula_on_nonuniform(tc)

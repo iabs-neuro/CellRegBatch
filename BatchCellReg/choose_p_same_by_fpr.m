@@ -1,22 +1,24 @@
 function [p_same, fpr, unreachable] = choose_p_same_by_fpr(centers, fpr_vector, fpr_max)
-%CHOOSE_P_SAME_BY_FPR Prefer P_same=0.5; ascend to 0.95 only if FPR(0.5)>fpr_max.
-%   Rule: keep the bin nearest 0.5 if its FPR<=fpr_max. Otherwise pick the
-%   smallest bin center in (0.5-bin, 0.95] whose FPR<=fpr_max. If none, set
-%   unreachable=true and return the bin nearest 0.95.
+%CHOOSE_P_SAME_BY_FPR Prefer P_same=0.5; ascend toward 0.95 only if the
+%   CUMULATIVE FPR at 0.5 exceeds fpr_max. FPR at a P_same threshold p is
+%   cumsum(fpr_vector)(round(N*(1-p))), matching CellReg save_log_file.m
+%   (lines 92-94) so the gate and the written logFile agree exactly.
     centers = centers(:); fpr_vector = fpr_vector(:);
+    N = numel(fpr_vector);
+    cum = cumsum(fpr_vector);
+    fpr_at = @(p) cum( max(1, min(N, round(N*(1-p)))) );
+
     [~, i50] = min(abs(centers - 0.5));
-    if fpr_vector(i50) <= fpr_max
-        p_same = centers(i50); fpr = fpr_vector(i50); unreachable = false; return
+    if fpr_at(centers(i50)) <= fpr_max
+        p_same = centers(i50); fpr = fpr_at(centers(i50)); unreachable = false; return
     end
     [~, i95] = min(abs(centers - 0.95));
-    cand = (1:numel(centers))';
-    cand = cand(cand > i50 & cand <= i95 & fpr_vector <= fpr_max);
+    cand = (i50+1:i95)';
+    cand = cand(arrayfun(@(k) fpr_at(centers(k)) <= fpr_max, cand));
     if ~isempty(cand)
-        idx = cand(1);              % smallest center meeting FPR
-        unreachable = false;
+        idx = cand(1); unreachable = false;       % smallest P_same>0.5 meeting FPR
     else
-        idx = i95;                  % cap at 0.95, flag
-        unreachable = true;
+        idx = i95; unreachable = true;            % cap at 0.95, flag
     end
-    p_same = centers(idx); fpr = fpr_vector(idx);
+    p_same = centers(idx); fpr = fpr_at(centers(idx));
 end

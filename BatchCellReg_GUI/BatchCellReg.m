@@ -15,7 +15,24 @@ function app = BatchCellReg()
     build_parameters_tab(app);
     build_run_tab(app);
 
-    setappdata(app.fig, 'app', app);
+    % build_*_tab already persisted a fully-merged `app` (with all `ui`
+    % handles) into appdata via save_app. Read it back instead of writing the
+    % original ui-less local struct, which would clobber every ui.* handle and
+    % break Browse/Scan/Run.
+    app = getappdata(app.fig, 'app');
+end
+
+function refocus(fig)
+    %REFOCUS Bring the uifigure back to front. Java dialogs (uigetdir/
+    % uigetfile/uiputfile) steal focus from uifigures and leave another window
+    % active when they close; pull focus back so the GUI stays usable.
+    drawnow;
+    try
+        figure(fig);
+    catch
+        fig.Visible = 'off';
+        fig.Visible = 'on';
+    end
 end
 
 function build_setup_tab(app)
@@ -58,7 +75,10 @@ end
 
 function on_browse(fig)
     app = getappdata(fig, 'app');
-    d = uigetdir(app.config.io.input_folder);
+    start = app.config.io.input_folder;
+    if isempty(start) || ~exist(start, 'dir'); start = pwd; end
+    d = uigetdir(start);
+    refocus(fig);
     if isnumeric(d) && d == 0; return; end
     app.config.io.input_folder = d;
     app.ui.input_edit.Value = d;
@@ -200,6 +220,7 @@ end
 
 function on_load_cfg(fig)
     [name, path] = uigetfile('*.json', 'Load config');
+    refocus(fig);
     if isnumeric(name); return; end
     app = getappdata(fig, 'app');
     app.config = config_from_json(fullfile(path, name));
@@ -209,6 +230,7 @@ end
 
 function on_save_cfg(fig)
     [name, path] = uiputfile('*.json', 'Save config');
+    refocus(fig);
     if isnumeric(name); return; end
     app = getappdata(fig, 'app');
     config_to_json(app.config, fullfile(path, name));
@@ -244,8 +266,7 @@ function build_run_tab(app)
     app.ui.log_area = uitextarea(t, 'Position', [20 320 840 200], 'Editable', 'off');
 
     app.ui.results_table = uitable(t, 'Position', [20 80 840 230], ...
-        'ColumnName', {'Dataset','Sess','Cells','%match','FPR', ...
-                       'W1','W2','W2b_h','W2b_r','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'}, ...
+        'ColumnName', results_table_headers(), ...
         'ColumnFormat', {'char','numeric','numeric','numeric','numeric', ...
                          'numeric','numeric','numeric','numeric','numeric','numeric', ...
                          'numeric','numeric','numeric','numeric','numeric','numeric'});
@@ -318,24 +339,7 @@ function fill_results_table(fig, summary)
             f.W1, f.W2, f.W2b_hard, f.W2b_rel, f.W3a, f.W3b, f.W4, f.W5a, f.W5b, f.W6a, f.W6b, f.W7};
     end
     app.ui.results_table.Data = rows;
-    % Apply severity coloring: red=2, yellow=1 for W columns (cols 6-17)
-    try
-        removeStyle(app.ui.results_table);
-        redS = uistyle('BackgroundColor', [1 0.6 0.6]);
-        yelS = uistyle('BackgroundColor', [1 1 0.6]);
-        wcols = 6:17;
-        for rr = 1:size(rows, 1)
-            for cc = wcols
-                v = rows{rr, cc};
-                if isequal(v, 2)
-                    addStyle(app.ui.results_table, redS, 'cell', [rr cc]);
-                elseif isequal(v, 1)
-                    addStyle(app.ui.results_table, yelS, 'cell', [rr cc]);
-                end
-            end
-        end
-    catch
-    end
+    apply_severity_styles(app.ui.results_table, rows, 6:17);
 end
 
 function on_export(fig, which)
@@ -345,10 +349,12 @@ function on_export(fig, which)
     end
     if strcmp(which, 'results')
         [n, p] = uiputfile('*.csv', 'Save results', '_batch_results.csv');
+        refocus(fig);
         if isnumeric(n); return; end
         copyfile(app.last_summary.results_csv, fullfile(p, n));
     else
         [n, p] = uiputfile('*.txt', 'Save log', '_batch_log.txt');
+        refocus(fig);
         if isnumeric(n); return; end
         copyfile(app.last_summary.log_file, fullfile(p, n));
     end
@@ -358,5 +364,36 @@ function on_open_out(fig)
     app = getappdata(fig, 'app');
     if isfield(app, 'last_summary')
         winopen(app.last_summary.output_dir);
+    end
+end
+
+function names = results_table_headers()
+%RESULTS_TABLE_HEADERS Two-line (code\nwords) column labels for results_table.
+    m = anomaly_decode_map();
+    wcodes = {'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
+    wtags  = {'W1','W2','W2b_h','W2b_r','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
+    names = {'Dataset','Sess','Cells','%match','FPR'};
+    for k = 1:numel(wcodes)
+        names{end+1} = sprintf('%s\n%s', wtags{k}, m(wcodes{k}).short); %#ok<AGROW>
+    end
+end
+
+function apply_severity_styles(tbl, rows, wcols)
+%APPLY_SEVERITY_STYLES Color W cells: 2=red, 1=yellow. R2020a-safe.
+    try
+        removeStyle(tbl);
+        redS = uistyle('BackgroundColor', [1 0.6 0.6]);
+        yelS = uistyle('BackgroundColor', [1 1 0.6]);
+        for rr = 1:size(rows, 1)
+            for cc = wcols
+                v = rows{rr, cc};
+                if isequal(v, 2)
+                    addStyle(tbl, redS, 'cell', [rr cc]);
+                elseif isequal(v, 1)
+                    addStyle(tbl, yelS, 'cell', [rr cc]);
+                end
+            end
+        end
+    catch
     end
 end

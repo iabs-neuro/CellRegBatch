@@ -385,7 +385,7 @@ end
 function names = results_table_headers()
 %RESULTS_TABLE_HEADERS Two-line (code\nwords) column labels for results_table.
     m = anomaly_decode_map();
-    wcodes = {'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
+    wcodes = w_codes();
     wtags  = {'W1','W2','W2b_h','W2b_r','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
     names = {'Dataset','Sess','Cells','%match','FPR'};
     for k = 1:numel(wcodes)
@@ -433,8 +433,7 @@ end
 function fill_results_from_csv(fig, r, full)
     app = getappdata(fig, 'app');
     col = @(nm) find(strcmp(r.headers, nm), 1);
-    want = {'dataset_id','n_sessions','n_cells','pct_in_all','chosen_fpr', ...
-        'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
+    want = [{'dataset_id','n_sessions','n_cells','pct_in_all','chosen_fpr'}, w_codes()];
     idx = cellfun(col, want);
     n = size(r.rows, 1);
     rows = cell(n, 17);
@@ -461,7 +460,7 @@ function on_results_cell_selected(fig, e)
         return
     end
     rr = e.Indices(1); cc = e.Indices(2);
-    wcodes = {'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
+    wcodes = w_codes();
     if cc < 6 || cc > 17
         app.ui.decode_line.Value = 'Not a warning column.';
         return
@@ -479,4 +478,9 @@ function on_results_cell_selected(fig, e)
     si = max(0, min(2, round(sev))) + 1;
     app.ui.decode_line.Value = sprintf('%s   [%s] severity = %g (%s)', ...
         m(code).desc, ds, sev, sevw{si});
+end
+
+function c = w_codes()
+%W_CODES Canonical anomaly codes for results-table columns 6..17 (in order).
+    c = {'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
 end

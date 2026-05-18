@@ -259,9 +259,11 @@ function build_run_tab(app)
 
     uibutton(t, 'Position', [20 540 80 24], 'Text', 'Run batch', ...
         'ButtonPushedFcn', @(s,e) on_run(app.fig));
-    uibutton(t, 'Position', [110 540 80 24], 'Text', 'Stop', ...
+    uibutton(t, 'Position', [110 540 70 24], 'Text', 'Stop', ...
         'ButtonPushedFcn', @(s,e) on_stop(app.fig));
-    app.ui.progress_label = uilabel(t, 'Position', [200 540 400 24], 'Text', 'idle');
+    uibutton(t, 'Position', [190 540 140 24], 'Text', 'Load results CSV...', ...
+        'ButtonPushedFcn', @(s,e) on_load_results(app.fig));
+    app.ui.progress_label = uilabel(t, 'Position', [340 540 280 24], 'Text', 'idle');
 
     app.ui.log_area = uitextarea(t, 'Position', [20 320 840 200], 'Editable', 'off');
 
@@ -344,15 +346,22 @@ end
 
 function on_export(fig, which)
     app = getappdata(fig, 'app');
-    if ~isfield(app, 'last_summary')
-        uialert(fig, 'No run results yet.', 'Export'); return;
+    has_run = isfield(app, 'last_summary');
+    has_loaded = isfield(app, 'loaded_csv_path') && ~isempty(app.loaded_csv_path);
+    if ~has_run && ~has_loaded
+        uialert(fig, 'No run or loaded results yet.', 'Export'); return;
     end
     if strcmp(which, 'results')
         [n, p] = uiputfile('*.csv', 'Save results', '_batch_results.csv');
         refocus(fig);
         if isnumeric(n); return; end
-        copyfile(app.last_summary.results_csv, fullfile(p, n));
+        if has_run; src = app.last_summary.results_csv; else; src = app.loaded_csv_path; end
+        copyfile(src, fullfile(p, n));
     else
+        if ~has_run
+            uialert(fig, 'Log export needs a live run (not a loaded CSV).', 'Export');
+            return
+        end
         [n, p] = uiputfile('*.txt', 'Save log', '_batch_log.txt');
         refocus(fig);
         if isnumeric(n); return; end
@@ -364,6 +373,8 @@ function on_open_out(fig)
     app = getappdata(fig, 'app');
     if isfield(app, 'last_summary')
         winopen(app.last_summary.output_dir);
+    elseif isfield(app, 'loaded_csv_path') && ~isempty(app.loaded_csv_path)
+        winopen(fileparts(app.loaded_csv_path));
     end
 end
 
@@ -396,4 +407,40 @@ function apply_severity_styles(tbl, rows, wcols)
         end
     catch
     end
+end
+
+function on_load_results(fig)
+    [name, path] = uigetfile('*.csv', 'Load _batch_results.csv');
+    refocus(fig);
+    if isnumeric(name); return; end
+    full = fullfile(path, name);
+    r = parse_batch_results_csv(full);
+    if ~r.ok
+        uialert(fig, r.error, 'Load results');
+        return
+    end
+    fill_results_from_csv(fig, r, full);
+end
+
+function fill_results_from_csv(fig, r, full)
+    app = getappdata(fig, 'app');
+    col = @(nm) find(strcmp(r.headers, nm), 1);
+    want = {'dataset_id','n_sessions','n_cells','pct_in_all','chosen_fpr', ...
+        'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
+    idx = cellfun(col, want);
+    n = size(r.rows, 1);
+    rows = cell(n, 17);
+    for k = 1:n
+        rows{k,1} = r.rows{k, idx(1)};
+        for c = 2:17
+            v = str2double(r.rows{k, idx(c)});
+            if isnan(v); v = 0; end
+            rows{k,c} = v;
+        end
+    end
+    app.ui.results_table.Data = rows;
+    apply_severity_styles(app.ui.results_table, rows, 6:17);
+    app.loaded_csv_path = full;
+    app.ui.progress_label.Text = sprintf('loaded %d rows from %s', n, full);
+    setappdata(fig, 'app', app);
 end

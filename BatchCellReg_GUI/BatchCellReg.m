@@ -419,6 +419,10 @@ function on_load_results(fig)
         uialert(fig, r.error, 'Load results');
         return
     end
+    if size(r.rows, 1) == 0
+        uialert(fig, 'CSV has no data rows.', 'Load results');
+        return
+    end
     fill_results_from_csv(fig, r, full);
 end
 

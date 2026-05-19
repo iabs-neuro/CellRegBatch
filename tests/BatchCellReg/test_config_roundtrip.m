@@ -9,13 +9,13 @@ function test_defaults_have_expected_keys(testCase)
     verifyEqual(testCase, cfg.cellreg.alignment_type, 'Translations');
     verifyEqual(testCase, cfg.cellreg.maximal_rotation, 5);
     verifyEqual(testCase, cfg.cellreg.reference_session_index, 1);
-    verifyEqual(testCase, cfg.cellreg.maximal_distance_um, 15);
+    verifyEqual(testCase, cfg.cellreg.maximal_distance_um, 50);
     verifyEqual(testCase, cfg.cellreg.registration_approach, 'Probabilistic');
     verifyEqual(testCase, cfg.cellreg.initial_registration_type, 'auto');
     verifyTrue(testCase, cfg.cellreg.use_parallel_processing);
     verifyEqual(testCase, cfg.cellreg.figures_visibility, 'off');
     verifyTrue(testCase, cfg.cellreg.write_to_file);
-    verifyEqual(testCase, cfg.cellreg.alignment_min_xcorr, 0.3);
+    verifyEqual(testCase, cfg.cellreg.alignment_min_xcorr, 0.2);
     verifyEqual(testCase, cfg.cellreg.expected_n_sessions, 5);
     verifyEqual(testCase, cfg.cellreg.rotation_fallback_deg, 90);
     verifyEqual(testCase, cfg.cellreg.nonrigid_smoothness, 2);

@@ -23,7 +23,12 @@ function test_runs_on_sample_data_our(testCase)
     cfg.cellreg.use_parallel_processing = false;
     cfg.cellreg.figures_visibility = 'off';
 
+    figs_before = findall(groot, 'Type', 'figure');
     summary = batch_run(out, cfg);
+
+    % Vendor plot_* functions never close their figures; leaked hidden
+    % figures hold full-FOV images and exhaust RAM over a long batch.
+    verifyEmpty(testCase, setdiff(findall(groot, 'Type', 'figure'), figs_before));
 
     % The batch must attempt at least one dataset (n_succeeded + n_failed >= 1).
     % SampleDataOur/BOWL_D01 session 2 cannot be aligned to the reference: its

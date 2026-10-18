@@ -6,6 +6,12 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
 %   out_subdir: directory to write outputs into (created if missing).
 %   logger: batch_logger handle.
 
+    % Vendor plot_* functions save but never close their figures; with hidden
+    % figures holding full-FOV images, RAM grows dataset by dataset until the
+    % batch is killed. Close everything this run opened, on success or error.
+    figs_before = findall(groot, 'Type', 'figure');
+    close_figs = onCleanup(@() delete(setdiff(findall(groot, 'Type', 'figure'), figs_before)));
+
     figures_dir = fullfile(out_subdir, 'Figures');
     if ~exist(figures_dir, 'dir'); mkdir(figures_dir); end
     fig_vis = cfg.cellreg.figures_visibility;

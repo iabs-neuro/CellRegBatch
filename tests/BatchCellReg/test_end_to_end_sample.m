@@ -38,4 +38,13 @@ function test_runs_on_sample_data_our(testCase)
     verifyGreaterThan(testCase, summary.n_succeeded + summary.n_failed, 0);
     verifyTrue(testCase, exist(summary.results_csv, 'file') == 2);
     verifyTrue(testCase, exist(summary.log_file, 'file') == 2);
+
+    % Vendor alignment_translations are in MICRONS (align_images.m:428);
+    % alignment_shift_px (compared to max_translation_px) must be PIXELS.
+    for r = summary.results
+        if ~isempty(r.error); continue; end
+        expected = hypot(r.alignment_translations(1, :), r.alignment_translations(2, :)) ...
+            / cfg.cellreg.microns_per_pixel;
+        verifyEqual(testCase, r.alignment_shift_px, expected, 'AbsTol', 1e-9);
+    end
 end

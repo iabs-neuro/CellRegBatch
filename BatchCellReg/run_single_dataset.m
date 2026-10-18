@@ -339,7 +339,10 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
 
     % --- result for anomaly detector ---
     stats = collect_match_stats(opt_map);
-    shifts_px = sqrt(alignment_translations(1, :).^2 + alignment_translations(2, :).^2);
+    % Vendor translations are in microns (align_images.m:428); W5a compares
+    % against max_translation_px, so convert to pixels.
+    shifts_px = hypot(alignment_translations(1, :), alignment_translations(2, :)) ...
+        / microns_per_pixel;
 
     result = struct();
     result.dataset_id = dataset.dataset_id;

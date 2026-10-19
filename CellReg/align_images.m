@@ -307,14 +307,14 @@ else
         y_ind=y_ind+round(cross_corr_size(1)/2-cross_corr_size(1)/6)-1;
         if abs(sub_x)>1
             warning(['X axis sub-pixel correction was ' num2str(round(100*sub_x)/100) ' for session ' num2str(registration_order(n))])
-            warndlg(['X axis sub-pixel correction was ' num2str(round(100*sub_x)/100) ' for session ' num2str(registration_order(n))])
+            % warndlg removed (batch wrapper): blocking dialog -> console warning above
             x_ind_sub=x_ind;
         else
             x_ind_sub=x_ind+sub_x;
         end
         if abs(sub_y)>1
             warning(['Y axis sub-pixel correction was ' num2str(round(100*sub_y)/100) ' for session ' num2str(registration_order(n))])
-            warndlg(['Y axis sub-pixel correction was ' num2str(round(100*sub_y)/100) ' for session ' num2str(registration_order(n))])
+            % warndlg removed (batch wrapper): blocking dialog -> console warning above
             y_ind_sub=y_ind;
         else
             y_ind_sub=y_ind+sub_y;
@@ -411,13 +411,13 @@ else
         else % if no appropriate rotations/translations were found
             if strcmp(alignment_type,'Translations and Rotations') % rotating cells
                 warning(['Session ' num2str(registration_order(n)) ' does not resemble the reference session - try using non-rigid transformation'])
-                warndlg(['Session ' num2str(registration_order(n)) ' does not resemble the reference session - try using non-rigid transformation'])
+                % warndlg removed (batch wrapper): blocking dialog -> console warning above
             elseif strcmp(alignment_type,'Translations') % rotating cells
                 warning(['Session ' num2str(registration_order(n)) ' does not resemble the reference session - try using rotations'])
-                warndlg(['Session ' num2str(registration_order(n)) ' does not resemble the reference session - try using rotations'])
+                % warndlg removed (batch wrapper): blocking dialog -> console warning above
             else
                 warning(['Session ' num2str(registration_order(n)) ' does not resemble the reference session - could not align session'])
-                warndlg(['Session ' num2str(registration_order(n)) ' does not resemble the reference session - could not align session'])
+                % warndlg removed (batch wrapper): blocking dialog -> console warning above
             end
             bad_algn_sessions = [bad_algn_sessions, registration_order(n)];
         end

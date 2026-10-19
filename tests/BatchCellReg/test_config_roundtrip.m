@@ -9,7 +9,7 @@ function test_defaults_have_expected_keys(testCase)
     verifyEqual(testCase, cfg.cellreg.alignment_type, 'Translations');
     verifyEqual(testCase, cfg.cellreg.maximal_rotation, 5);
     verifyEqual(testCase, cfg.cellreg.reference_session_index, 1);
-    verifyEqual(testCase, cfg.cellreg.maximal_distance_um, 50);
+    verifyEqual(testCase, cfg.cellreg.maximal_distance_um, 15);
     verifyEqual(testCase, cfg.cellreg.registration_approach, 'Probabilistic');
     verifyEqual(testCase, cfg.cellreg.initial_registration_type, 'auto');
     verifyTrue(testCase, cfg.cellreg.use_parallel_processing);

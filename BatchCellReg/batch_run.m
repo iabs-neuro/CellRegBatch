@@ -96,7 +96,8 @@ function r = normalize_result(r)
         'maximal_cross_correlation', [], 'alignment_translations', [], ...
         'alignment_shift_px', [], 'reference_session_index', 1, ...
         'MSE_model', NaN, 'best_model_string', '', 'chosen_p_same', NaN, ...
-        'chosen_fpr', NaN, 'p_same_unreachable', false);
+        'chosen_fpr', NaN, 'p_same_unreachable', false, ...
+        'alignment_mode', '', 'forced_low_xcorr', false);
     fns = fieldnames(defaults);
     for k = 1:numel(fns)
         if ~isfield(r, fns{k})
@@ -185,8 +186,28 @@ function v = ratio(s)
 end
 
 function write_cell_csv(rows, path)
+    % A locked target (e.g. the CSV is open in Excel) must never discard a
+    % completed batch: retry briefly, then fall back to a timestamped name.
     fid = fopen(path, 'w');
-    if fid < 0; error('BatchCellReg:CsvWrite', 'Cannot write %s', path); end
+    if fid < 0
+        for attempt = 1:3
+            pause(1);
+            fid = fopen(path, 'w');
+            if fid >= 0; break; end
+        end
+    end
+    if fid < 0
+        [p, n, e] = fileparts(path);
+        alt = fullfile(p, sprintf('%s_%s%s', n, datestr(now, 'yyyymmdd_HHMMSS'), e));
+        fid = fopen(alt, 'w');
+        if fid < 0
+            warning('BatchCellReg:CsvWrite', ...
+                'Cannot write %s (locked?) nor fallback %s; skipping CSV.', path, alt);
+            return
+        end
+        warning('BatchCellReg:CsvWrite', ...
+            '%s was locked; wrote %s instead. Close the file in Excel.', path, alt);
+    end
     cleanup = onCleanup(@() fclose(fid));
     for r = 1:size(rows, 1)
         line = '';

@@ -2,6 +2,10 @@ function tests = test_batch_logger
     tests = functiontests(localfunctions);
 end
 
+function setupOnce(~)
+    addpath(genpath(fullfile(fileparts(mfilename('fullpath')), '..', '..', 'BatchCellReg')));
+end
+
 function test_writes_to_file_and_live(testCase)
     file_path = [tempname '.txt'];
     live_path = [tempname '.txt'];

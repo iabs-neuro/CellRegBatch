@@ -7,6 +7,10 @@ function tests = test_choose_p_same_by_fpr
     tests = functiontests(localfunctions);
 end
 
+function setupOnce(~)
+    addpath(genpath(fullfile(fileparts(mfilename('fullpath')), '..', '..', 'BatchCellReg')));
+end
+
 function c = centers1000()
     c = (1:1000)' / 1000;          % vendor: 1000 bins, centers(k)=k/1000
 end

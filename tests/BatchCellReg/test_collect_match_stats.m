@@ -2,6 +2,10 @@ function tests = test_collect_match_stats
     tests = functiontests(localfunctions);
 end
 
+function setupOnce(~)
+    addpath(genpath(fullfile(fileparts(mfilename('fullpath')), '..', '..', 'BatchCellReg')));
+end
+
 function test_counts_cells_present_in_k_sessions(testCase)
     % rows = cells, cols = sessions. Non-zero = present.
     cell_to_index_map = [ ...

@@ -2,6 +2,10 @@ function tests = test_config_roundtrip
     tests = functiontests(localfunctions);
 end
 
+function setupOnce(~)
+    addpath(genpath(fullfile(fileparts(mfilename('fullpath')), '..', '..', 'BatchCellReg')));
+end
+
 function test_defaults_have_expected_keys(testCase)
     cfg = batch_default_config();
     verifyEqual(testCase, cfg.version, 1);

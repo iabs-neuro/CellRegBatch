@@ -2,6 +2,10 @@ function tests = test_prepare_session_files
     tests = functiontests(localfunctions);
 end
 
+function setupOnce(~)
+    addpath(genpath(fullfile(fileparts(mfilename('fullpath')), '..', '..', 'BatchCellReg')));
+end
+
 function test_uint8_is_converted_to_double(testCase)
     tmp = [tempname '.mat'];
     cleanup = onCleanup(@() delete(tmp));

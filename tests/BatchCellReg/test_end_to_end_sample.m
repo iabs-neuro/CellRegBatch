@@ -36,6 +36,24 @@ function test_runs_on_shipped_cellreg_sample_data(testCase)
     verifyNotEmpty(testCase, dir(fullfile(out, 'Figures', '*.png')));
 end
 
+function test_explicit_empty_selection_runs_nothing(testCase)
+    % The GUI passes the ticked rows; clearing every box must not mean "all".
+    repo_root = fullfile(fileparts(mfilename('fullpath')), '..', '..');
+    addpath(genpath(fullfile(repo_root, 'BatchCellReg')));
+    in = fullfile(tempdir, ['BatchCellReg_sel_' datestr(now,'HHMMSSFFF')]);
+    mkdir(in);
+    cleanup = onCleanup(@() rmdir(in, 's'));
+    for k = 1:2
+        copyfile(fullfile(repo_root, 'SampleData', sprintf('spatial_footprints_%02d.mat', k)), ...
+                 fullfile(in, sprintf('DEMO_M01_%dD.mat', k)));
+    end
+    cfg = batch_default_config();
+    cfg.cellreg.use_parallel_processing = false;
+    summary = batch_run(in, cfg, struct('selected_datasets', {{}}));
+    verifyEqual(testCase, summary.n_succeeded + summary.n_failed, 0);
+    verifyMatches(testCase, fileread(summary.log_file), 'DEMO_M01: skipped: not selected');
+end
+
 function test_runs_on_sample_data_our(testCase)
     repo_root = fullfile(fileparts(mfilename('fullpath')), '..', '..');
     sample_dir = fullfile(repo_root, 'SampleDataOur');

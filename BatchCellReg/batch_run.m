@@ -6,7 +6,8 @@ function summary = batch_run(input_folder, cfg, opts)
 %   opts (struct, all optional):
 %     .live_log_callback   function handle (msg) for GUI
 %     .stop_check          function handle returning logical (set true to stop)
-%     .selected_datasets   cell array of dataset_ids to run (default: all non-skip)
+%     .selected_datasets   cell array of dataset_ids to run. Absent: all
+%                          non-skipped datasets. Present but empty: none.
 %
 %   Returns summary struct: results, anomalies, output_dir, log_file, results_csv,
 %   detail_csv, n_succeeded, n_failed, n_with_warnings, stopped.
@@ -14,7 +15,7 @@ function summary = batch_run(input_folder, cfg, opts)
     if nargin < 3; opts = struct(); end
     if ~isfield(opts, 'live_log_callback'); opts.live_log_callback = []; end
     if ~isfield(opts, 'stop_check'); opts.stop_check = @() false; end
-    if ~isfield(opts, 'selected_datasets'); opts.selected_datasets = {}; end
+    has_selection = isfield(opts, 'selected_datasets');
 
     scan = scan_input_folder(input_folder);
 
@@ -28,7 +29,7 @@ function summary = batch_run(input_folder, cfg, opts)
     logger.info('GLOBAL', 'input=%s, output=%s, datasets=%d, unparsed=%d', ...
         input_folder, output_dir, numel(scan.datasets), numel(scan.unparsed));
 
-    results = [];
+    results = struct([]);
     stopped = false;
     for k = 1:numel(scan.datasets)
         d = scan.datasets(k);
@@ -42,7 +43,7 @@ function summary = batch_run(input_folder, cfg, opts)
             logger.warn(d.dataset_id, 'skipped: %s', d.skip_reason);
             continue
         end
-        if ~isempty(opts.selected_datasets) && ~ismember(d.dataset_id, opts.selected_datasets)
+        if has_selection && ~ismember(d.dataset_id, opts.selected_datasets)
             logger.info(d.dataset_id, 'skipped: not selected');
             continue
         end
@@ -63,6 +64,7 @@ function summary = batch_run(input_folder, cfg, opts)
 
     at = cfg.anomaly_thresholds;
     at.expected_n_sessions = cfg.cellreg.expected_n_sessions;
+    at.fpr_max = cfg.p_same_tuning.fpr_max;
     anomalies = detect_anomalies(results, at);
 
     [results_csv, detail_csv] = export_results(results, anomalies, output_dir);
@@ -139,42 +141,10 @@ function [results_csv, detail_csv] = export_results(results, anomalies, output_d
     write_cell_csv(rows, results_csv);
 
     detail = {'dataset_id', 'session', 'anomaly_type', 'value', 'threshold', 'severity'};
-    for k = 1:numel(results)
-        r = results(k); f = anomalies.flags(k); m = anomalies.metrics(k);
-        if ~isempty(r.error); continue; end
-        if f.W3a >= 1
-            [v, idx] = min(r.maximal_cross_correlation(:));
-            detail(end+1, :) = {r.dataset_id, sess_at(r, idx), 'W3a_low_xcorr_hard', v, NaN, f.W3a}; %#ok<AGROW>
-        end
-        if f.W5a >= 1
-            shifts = r.alignment_shift_px; shifts(r.reference_session_index) = NaN;
-            [v, idx] = max(abs(shifts));
-            detail(end+1, :) = {r.dataset_id, sess_at(r, idx), 'W5a_shift_hard', v, NaN, f.W5a}; %#ok<AGROW>
-        end
-        if f.W4 >= 1
-            detail(end+1, :) = {r.dataset_id, '-', 'W4_fpr_unreachable', r.chosen_fpr, NaN, f.W4}; %#ok<AGROW>
-        end
-        if f.W6a >= 1
-            detail(end+1, :) = {r.dataset_id, '-', 'W6a_mse_hard', r.MSE_model, NaN, f.W6a}; %#ok<AGROW>
-        end
-        if f.W1 >= 1
-            detail(end+1, :) = {r.dataset_id, '-', 'W1_pct_match_outlier', m.pct_in_all, NaN, f.W1}; %#ok<AGROW>
-        end
-        if f.W2b_hard == 2
-            detail(end+1, :) = {r.dataset_id, '-', 'W2b_hard_ratio', m.W2b_ratio, NaN, f.W2b_hard}; %#ok<AGROW>
-        end
-        if f.W2b_rel >= 1
-            detail(end+1, :) = {r.dataset_id, '-', 'W2b_rel', f.W2b_rel, NaN, f.W2b_rel}; %#ok<AGROW>
-        end
-        if f.W7 == 2
-            detail(end+1, :) = {r.dataset_id, '-', 'W7_session_count', m.n_sessions, NaN, f.W7}; %#ok<AGROW>
-        end
+    for d = anomalies.details
+        detail(end+1, :) = {d.dataset_id, d.session, d.anomaly_type, d.value, d.threshold, d.severity}; %#ok<AGROW>
     end
     write_cell_csv(detail, detail_csv);
-end
-
-function s = sess_at(r, idx)
-    if idx >= 1 && idx <= numel(r.sessions); s = r.sessions{idx}; else; s = '-'; end
 end
 
 function v = maybe_first(s)

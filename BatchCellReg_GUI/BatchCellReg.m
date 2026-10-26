@@ -37,17 +37,19 @@ end
 
 function build_setup_tab(app)
     t = uitab(app.tabs, 'Title', 'Setup');
-    uilabel(t, 'Position', [20 540 100 22], 'Text', 'Input folder:');
-    app.ui.input_edit = uieditfield(t, 'text', 'Position', [120 540 500 22]);
-    uibutton(t, 'Position', [630 540 80 22], 'Text', 'Browse...', ...
+    % Keep the top row below y+h = 550: the tab header takes ~25 px of the
+    % 580 px tab group, and anything higher is clipped.
+    uilabel(t, 'Position', [20 525 100 22], 'Text', 'Input folder:');
+    app.ui.input_edit = uieditfield(t, 'text', 'Position', [120 525 500 22]);
+    uibutton(t, 'Position', [630 525 80 22], 'Text', 'Browse...', ...
         'ButtonPushedFcn', @(s,e) on_browse(app.fig));
-    uibutton(t, 'Position', [720 540 80 22], 'Text', 'Scan', ...
+    uibutton(t, 'Position', [720 525 80 22], 'Text', 'Scan', ...
         'ButtonPushedFcn', @(s,e) on_scan(app.fig));
 
-    app.ui.output_label = uilabel(t, 'Position', [20 510 800 22], ...
+    app.ui.output_label = uilabel(t, 'Position', [20 497 800 22], ...
         'Text', 'Output: <choose folder first>');
 
-    app.ui.datasets_table = uitable(t, 'Position', [20 60 840 440], ...
+    app.ui.datasets_table = uitable(t, 'Position', [20 60 840 430], ...
         'ColumnName', {'Run','Dataset','# sessions','sessions'}, ...
         'ColumnEditable', [true false false false]);
 
@@ -257,15 +259,15 @@ end
 function build_run_tab(app)
     t = uitab(app.tabs, 'Title', 'Run & Results');
 
-    uibutton(t, 'Position', [20 540 80 24], 'Text', 'Run batch', ...
+    uibutton(t, 'Position', [20 524 80 24], 'Text', 'Run batch', ...
         'ButtonPushedFcn', @(s,e) on_run(app.fig));
-    uibutton(t, 'Position', [110 540 70 24], 'Text', 'Stop', ...
+    uibutton(t, 'Position', [110 524 70 24], 'Text', 'Stop', ...
         'ButtonPushedFcn', @(s,e) on_stop(app.fig));
-    uibutton(t, 'Position', [190 540 140 24], 'Text', 'Load results CSV...', ...
+    uibutton(t, 'Position', [190 524 140 24], 'Text', 'Load results CSV...', ...
         'ButtonPushedFcn', @(s,e) on_load_results(app.fig));
-    app.ui.progress_label = uilabel(t, 'Position', [340 540 280 24], 'Text', 'idle');
+    app.ui.progress_label = uilabel(t, 'Position', [340 524 500 24], 'Text', 'idle');
 
-    app.ui.log_area = uitextarea(t, 'Position', [20 320 840 200], 'Editable', 'off');
+    app.ui.log_area = uitextarea(t, 'Position', [20 320 840 194], 'Editable', 'off');
 
     app.ui.results_table = uitable(t, 'Position', [20 80 840 230], ...
         'ColumnName', results_table_headers(), ...
@@ -294,18 +296,21 @@ function on_run(fig)
     if isempty(folder); uialert(fig, 'Choose an input folder first.', 'Run'); return; end
     setappdata(fig, 'stop_requested', false);
 
-    selected = {};
-    if ~isempty(app.ui.datasets_table.Data)
-        rows = app.ui.datasets_table.Data;
-        for k = 1:size(rows, 1)
-            if rows{k, 1}; selected{end+1} = rows{k, 2}; end %#ok<AGROW>
-        end
-    end
-
     opts = struct();
     opts.live_log_callback = @(msg) append_log(fig, msg);
     opts.stop_check = @() getappdata(fig, 'stop_requested');
-    opts.selected_datasets = selected;
+    % Without a Scan the table is empty and batch_run takes every dataset.
+    % After a Scan, pass the ticked rows only, so clearing every box cannot
+    % fall back to "run all".
+    rows = app.ui.datasets_table.Data;
+    if ~isempty(rows)
+        selected = rows([rows{:, 1}], 2)';
+        if isempty(selected)
+            uialert(fig, 'No dataset is selected. Tick Run for at least one dataset on the Setup tab.', 'Run');
+            return
+        end
+        opts.selected_datasets = selected;
+    end
 
     app.ui.progress_label.Text = 'running...';
     drawnow;
@@ -376,9 +381,20 @@ end
 function on_open_out(fig)
     app = getappdata(fig, 'app');
     if isfield(app, 'last_summary')
-        winopen(app.last_summary.output_dir);
+        open_folder(app.last_summary.output_dir);
     elseif isfield(app, 'loaded_csv_path') && ~isempty(app.loaded_csv_path)
-        winopen(fileparts(app.loaded_csv_path));
+        open_folder(fileparts(app.loaded_csv_path));
+    end
+end
+
+function open_folder(p)
+    % winopen exists on Windows only.
+    if ispc
+        winopen(p);
+    elseif ismac
+        system(sprintf('open "%s"', p));
+    else
+        system(sprintf('xdg-open "%s" &', p));
     end
 end
 

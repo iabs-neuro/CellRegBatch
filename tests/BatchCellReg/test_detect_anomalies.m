@@ -2,6 +2,10 @@ function tests = test_detect_anomalies
     tests = functiontests(localfunctions);
 end
 
+function setupOnce(~)
+    addpath(genpath(fullfile(fileparts(mfilename('fullpath')), '..', '..', 'BatchCellReg')));
+end
+
 % -------------------------------------------------------------------------
 % Helpers
 % -------------------------------------------------------------------------
@@ -180,4 +184,87 @@ function test_relative_intra_checks_skipped_few_samples(testCase)
     a = detect_anomalies(rs, default_thresholds());
     verifyEqual(testCase, a.flags.W5b, 0);
     verifyEqual(testCase, a.flags.W5a, 2);
+end
+
+% -------------------------------------------------------------------------
+% Test 11: details name the right session for W3a
+% CellReg gives one xcorr per non-reference session, so with reference 1 the
+% values [0.6 0.25] belong to sessions 2D and 3D, not 1D and 2D.
+% -------------------------------------------------------------------------
+
+function test_details_w3a_session_skips_reference(testCase)
+    rs = make_result('A1', {'1D','2D','3D'}, [10 10 10], [10 5 3 2], [0.6 0.25], [0 3 4], 0.005, false, 1);
+    a = detect_anomalies(rs, default_thresholds());
+    d = a.details(strcmp({a.details.anomaly_type}, 'W3a_low_xcorr_hard'));
+    verifyEqual(testCase, d.session, '3D');
+    verifyEqual(testCase, d.value, 0.25);
+    verifyEqual(testCase, d.threshold, 0.3);
+end
+
+% -------------------------------------------------------------------------
+% Test 12: W2b_rel detail holds the ratio and the crossed limit, not the severity
+% ratios [1 1 1 1 1 2.5]: mean 1.25, std 0.612, z(2.5) = 2.04 > 2 => red
+% -------------------------------------------------------------------------
+
+function test_details_w2b_rel_reports_ratio_and_bound(testCase)
+    rs = [];
+    for k = 1:5
+        rs = [rs, make_result(sprintf('N%d',k), {'1D','2D'}, [10 10], [10 4 6], 0.5, [0 1], 0.005, false, 1)]; %#ok<AGROW>
+    end
+    rs = [rs, make_result('R', {'1D','2D'}, [10 25], [25 4 21], 0.5, [0 1], 0.005, false, 1)];
+    a = detect_anomalies(rs, default_thresholds());
+    d = a.details(strcmp({a.details.dataset_id}, 'R') & strcmp({a.details.anomaly_type}, 'W2b_rel'));
+    verifyEqual(testCase, d.severity, 2);
+    verifyEqual(testCase, d.value, 2.5);
+    ratios = [1 1 1 1 1 2.5];
+    verifyEqual(testCase, d.threshold, mean(ratios) + 2 * std(ratios), 'AbsTol', 1e-12);
+end
+
+% -------------------------------------------------------------------------
+% Test 13: every fired flag has exactly one detail row with the same severity
+% Dataset 'Bad' has 7 sessions so the within-dataset checks can reach |z| > 2.
+% -------------------------------------------------------------------------
+
+function test_details_cover_every_fired_flag(testCase)
+    rs = [];
+    for k = 1:5
+        rs = [rs, make_result(sprintf('N%d',k), {'1D','2D','3D','4D','5D'}, [10 10 10 10 10], ...
+            [10 4 2 2 1 1], [0.8 0.8 0.8 0.8], [0 1 1 1 1], 0.005, false, 1)]; %#ok<AGROW>
+    end
+    rs = [rs, make_result('Bad', {'1D','2D','3D','4D','5D','6D','7D'}, [100 100 100 100 100 100 10], ...
+        [100 5 0 0 0 0 0 95], [0.8 0.8 0.8 0.8 0.8 0.1], [0 1 1 1 1 1 50], 0.2, true, 1)];
+    thresh = default_thresholds();
+    thresh.expected_n_sessions = 5;
+    thresh.fpr_max = 0.03;
+    a = detect_anomalies(rs, thresh);
+
+    bad = a.flags(strcmp(a.dataset_ids, 'Bad'));
+    codes = fieldnames(bad);
+    verifyTrue(testCase, all(cellfun(@(c) bad.(c) > 0, codes)), 'all 12 checks should fire for Bad');
+
+    types = {a.details.anomaly_type};
+    detail_codes = regexp(types, '^W\d+[ab]?(_hard|_rel)?', 'match', 'once');
+    for k = 1:numel(a.flags)
+        for c = 1:numel(codes)
+            sel = strcmp({a.details.dataset_id}, a.dataset_ids{k}) & strcmp(detail_codes, codes{c});
+            sev = a.flags(k).(codes{c});
+            verifyEqual(testCase, sum(sel), double(sev > 0), sprintf('%s %s', a.dataset_ids{k}, codes{c}));
+            if sev > 0
+                verifyEqual(testCase, a.details(sel).severity, sev);
+                verifyFalse(testCase, isnan(a.details(sel).threshold), ...
+                    sprintf('%s %s threshold', a.dataset_ids{k}, codes{c}));
+            end
+        end
+    end
+end
+
+% -------------------------------------------------------------------------
+% Test 14: no processed dataset (every dataset skipped or not selected)
+% -------------------------------------------------------------------------
+
+function test_empty_results(testCase)
+    a = detect_anomalies(struct([]), default_thresholds());
+    verifyEmpty(testCase, a.dataset_ids);
+    verifyEmpty(testCase, a.flags);
+    verifyEmpty(testCase, a.details);
 end

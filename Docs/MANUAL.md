@@ -123,8 +123,9 @@ path for the current session. It does not save the path.
 | Table | One row per dataset: **Run** (check box), dataset name, number of sessions, session list in session order. |
 | Unparsed files | Number of `.mat` files with names that do not match the rule in 1.2. |
 
-Clear **Run** for the datasets that you do not want to process. If you do not
-click **Scan**, **Run batch** processes all datasets.
+Clear **Run** for the datasets that you do not want to process. If you clear
+**Run** for all datasets, **Run batch** shows a message and does not start. If
+you do not click **Scan**, **Run batch** processes all datasets.
 
 **Parameters tab**
 
@@ -155,7 +156,7 @@ The tab shows the most-used parameters. Section 3 describes all of them.
 | Decode line | Click a warning cell. The line below the table explains the warning. |
 | **Export results CSV** | Save a copy of `_batch_results.csv`. |
 | **Export log TXT** | Save a copy of the batch log. It works after a run, not after **Load results CSV**. |
-| **Open output folder** | Open the output folder in the file explorer (Windows only). |
+| **Open output folder** | Open the output folder in the file explorer. |
 
 ### 2.2 Script
 
@@ -178,15 +179,15 @@ does not read `cfg.io.input_folder`.
 
 | `opts` field | Meaning |
 |---|---|
-| `selected_datasets` | Cell array of dataset names to run. Empty (default) = all datasets that are not skipped. |
+| `selected_datasets` | Cell array of dataset names to run. If `opts` does not have this field, all datasets that are not skipped run. An empty cell array runs no dataset. |
 | `live_log_callback` | Function handle `@(line)`. It receives each log line. |
 | `stop_check` | Function handle that returns `true` to stop before the next dataset. |
 
 | `summary` field | Meaning |
 |---|---|
 | `results` | Struct array, one element per processed dataset (see 4.8). |
-| `anomalies` | `.flags` (warning severities) and `.metrics` per dataset. |
-| `output_dir`, `log_file`, `results_csv`, `detail_csv` | Paths of the output folder and files. |
+| `anomalies` | `.flags` (warning severities) and `.metrics` per dataset; `.details`, one element per fired warning (the rows of 5.2). |
+| `output_dir`, `log_file`, `results_csv`, `detail_csv`, `match_stats_csv` | Paths of the output folder and files. |
 | `n_succeeded`, `n_failed`, `n_with_warnings` | Counts. A dataset counts as "with warnings" if any warning is 1 or 2. |
 | `stopped` | `true` if the batch stopped early. |
 
@@ -337,7 +338,8 @@ scores.
 
 When `write_to_file` is on, the batch first deletes old `cellRegistered_*.mat`
 and `logFile_*.txt` files in the dataset folder. Then it writes new ones. Each
-dataset folder holds one result.
+dataset folder holds one result. The batch also writes the cell map of the
+dataset as `<dataset>_cellmap.csv` in the output folder (5.5).
 
 The result that the batch keeps for the warnings has these fields:
 `dataset_id`, `sessions`, `n_cells_per_session`, `match_stats`,
@@ -362,14 +364,16 @@ hidden figures fill the memory during a long batch.
     ├── _batch_log_YYYYMMDD_HHMMSS.txt         one log per run
     ├── _batch_results.csv                     one row per processed dataset
     ├── _batch_warnings_detail.csv             one row per fired warning
+    ├── _match_statistics.csv                  cells found in k sessions, per dataset
+    ├── <dataset>_cellmap.csv                  cell map of each dataset
     └── <dataset>/                             for example CC_H02/
         ├── cellRegistered_YYYYMMDD_HHMMSS.mat
         ├── logFile_YYYYMMDD_HHMMSS.txt
         └── Figures/                           CellReg figures, .fig and .png
 ```
 
-Each run overwrites `_batch_config.json`, `_batch_results.csv` and
-`_batch_warnings_detail.csv`. If a CSV file is open in another program (for
+Each run overwrites `_batch_config.json`, `_batch_results.csv`,
+`_batch_warnings_detail.csv` and `_match_statistics.csv`. If a CSV file is open in another program (for
 example Excel), the batch tries again 3 times. Then it writes a copy with a
 time stamp in the name and gives a MATLAB warning.
 
@@ -395,11 +399,47 @@ does not compute warnings for failed datasets.
 
 ### 5.2 `_batch_warnings_detail.csv`
 
-One row for each fired warning of these types: W1, W2b_hard, W2b_rel, W3a,
-W4, W5a, W6a, W7. Columns: `dataset_id`, `session`, `anomaly_type`, `value`,
-`threshold`, `severity`. Section 9 lists the known problems of this file.
+One row for each warning with severity 1 or 2.
 
-### 5.3 Batch log
+| Column | Meaning |
+|---|---|
+| `dataset_id` | Dataset name. |
+| `session` | The session that caused the warning, for the checks of single sessions (W2, W3a, W3b, W5a, W5b). `-` for the checks of the whole dataset. |
+| `anomaly_type` | Code and short name, for example `W3a_low_xcorr_hard`. |
+| `value` | The value that the check tested (see the table below). |
+| `threshold` | The limit that `value` crossed, in the same units. For a red "batch" or "within" check: mean ± `z_threshold` × SD. For a yellow "batch" check: the first or the third quartile. |
+| `severity` | 1 = yellow, 2 = red. |
+
+| `anomaly_type` | `value` |
+|---|---|
+| `W1_pct_match_outlier` | `pct_in_all` of the dataset |
+| `W2_cells_outlier` | Number of cells in the session with the largest \|z\| |
+| `W2b_hard_ratio`, `W2b_rel` | Largest ÷ smallest number of cells per session |
+| `W3a_low_xcorr_hard` | Lowest cross-correlation with the reference session |
+| `W3b_xcorr_outlier` | Cross-correlation of the session with the largest \|z\| |
+| `W4_fpr_unreachable` | FPR at P_same = 0.95. The limit is `fpr_max`. |
+| `W5a_shift_hard` | Largest shift of a non-reference session, in pixels |
+| `W5b_shift_outlier` | Shift of the session with the largest \|z\|, in pixels |
+| `W6a_mse_hard`, `W6b_mse_rel` | MSE of the chosen model |
+| `W7_session_count` | Number of sessions. The limit is `expected_n_sessions`. |
+
+### 5.3 `_match_statistics.csv`
+
+One row per dataset that did not fail. The columns count the registered cells
+by the number of sessions they were found in.
+
+| Column | Meaning |
+|---|---|
+| `dataset_id`, `n_sessions` | Dataset name and number of sessions. |
+| `n_cells` | Number of registered cells, as in `_batch_results.csv`. |
+| `in_S_sessions` … `in_1_sessions` | Number of registered cells found in exactly k sessions. S is the largest number of sessions in the batch. For a dataset with fewer sessions, the columns above its own number are empty. |
+| `mean_cells_per_session` | Mean number of cells per session. |
+| `pct_in_all` | Cells found in all sessions ÷ `n_cells`, as in `_batch_results.csv`. |
+| `pct_in_all_of_mean` | Cells found in all sessions ÷ `mean_cells_per_session`. |
+
+Section 7.2 compares the two fractions.
+
+### 5.4 Batch log
 
 Each line has the form `[HH:MM:SS] [LEVEL] DATASET: message`. `LEVEL` is
 `INFO`, `WARN` or `ERROR`. `GLOBAL` marks lines about the whole batch. The
@@ -407,8 +447,12 @@ log records the scan, each alignment mode that the batch tried, the chosen
 P_same and FPR, each skipped figure, and the full error report of a failed
 dataset.
 
-### 5.4 Files for each dataset
+### 5.5 Files for each dataset
 
+- `<dataset>_cellmap.csv`, in the output folder: the cell map
+  (`cell_to_index_map`, see 7.1) as a CSV file without a header. Each row is
+  one registered cell. Each column is one session, in session order. The value
+  is the number of the cell in the input file of that session. 0 = not found.
 - `cellRegistered_*.mat`: the CellReg registration result (7.1).
 - `logFile_*.txt`: the CellReg log file, written by CellReg's
   `save_log_file` in the same format as the CellReg GUI: parameters, number of cells, FPR, FNR, scores, model error.
@@ -480,16 +524,18 @@ line are in `BatchCellReg/anomaly_decode_map.m`.
 
 ### 7.1 Load the registration
 
-The batch saves the CellReg result struct under the variable name **`crs`**.
-The CellReg GUI and `demo.m` save the same struct under the name
-`cell_registered_struct`. The fields are the same. Code that must read both:
+The batch saves the CellReg result struct as `cell_registered_struct`, with
+the same name and fields as the CellReg GUI and `demo.m`. Code written for
+CellReg results reads the batch results without changes.
 
 ```matlab
 f = dir(fullfile(out_dir, 'CC_H02', 'cellRegistered_*.mat'));
 s = load(fullfile(f(1).folder, f(1).name));
-if isfield(s, 'crs'); reg = s.crs; else; reg = s.cell_registered_struct; end
-map = reg.cell_to_index_map;   % registered cells x sessions
+map = s.cell_registered_struct.cell_to_index_map;   % registered cells x sessions
 ```
+
+Outside MATLAB, use `CC_H02_cellmap.csv` in the output folder. It holds the
+same map.
 
 `map(i, j)` is the index of registered cell `i` in session `j`, in the order
 of the input footprints. 0 means that the cell was not found in that session.
@@ -499,9 +545,10 @@ User Manual.
 
 ### 7.2 Fraction of cells found in all sessions
 
-`pct_in_all` in `_batch_results.csv` divides by the number of registered
-cells. Some labs divide by the mean number of cells per session instead. The
-second value is larger. Compute both from the map:
+`pct_in_all` divides the cells found in all sessions by the number of
+registered cells. `pct_in_all_of_mean` divides them by the mean number of
+cells per session. The second value is larger. `_match_statistics.csv` gives
+both (5.3). To compute them from the map:
 
 ```matlab
 in_all      = sum(all(map > 0, 2));
@@ -540,8 +587,6 @@ fails.
 - **Names.** The animal ID must have 1–2 letters and exactly 2 digits. The
   session number has one digit, so a dataset can have at most 9 day sessions
   (`1D`–`9D`).
-- **Selection.** If you clear **Run** for every dataset, the batch runs all
-  datasets, because an empty selection means "all".
 - **Fixed approach.** The registration approach is always probabilistic.
   You cannot choose the model or the simple-threshold approach in the batch.
   Use the CellReg GUI (`GUI/CellReg.m`) for one dataset when you need them.
@@ -551,13 +596,7 @@ fails.
   spatial-correlation model). Line 27 computes `ind_05_distance`, but the code
   does not use it. So the choice between the two models (4.4) can be
   imperfect. We did not change this CellReg file.
-- **Warnings detail file.** In `_batch_warnings_detail.csv`: the `threshold`
-  column is always `NaN`; for W2b_rel the `value` column holds the severity,
-  not the ratio (use `W2b_ratio` in `_batch_results.csv`); for W3a the
-  `session` column can name the wrong session, because the cross-correlation
-  list does not contain the reference session.
 - **Figures.** The `.mat` result does not contain the model data, so you
   cannot remake the figures from it. Run the dataset again to get them.
-- **Windows.** **Open output folder** uses `winopen` and works on Windows
-  only. The rest of the code does not depend on the operating system, but we
-  tested it on Windows only.
+- **Operating system.** The code does not depend on the operating system,
+  but we tested it on Windows only.

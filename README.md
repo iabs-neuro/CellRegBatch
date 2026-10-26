@@ -38,8 +38,9 @@ fixed rules and records each one:
   the dataset with the rest of the batch. Each check gives red, yellow or no
   flag.
 - **Outputs.** For each dataset you get the usual CellReg outputs
-  (`cellRegistered_*.mat`, `logFile_*.txt`, all stage figures). For the batch
-  you get a results table, a warnings table, a log and the exact config.
+  (`cellRegistered_*.mat`, `logFile_*.txt`, all stage figures) and the cell
+  map as a CSV file. For the batch you get a results table, a table of cells
+  found in 1…S sessions, a warnings table, a log and the exact config.
 - **GUI.** Three tabs: Setup, Parameters, Run & Results. The GUI can reload a
   saved results table.
 
@@ -54,7 +55,7 @@ flowchart TD
     S45["CellReg stages 4-5: initial registration, clustering"]
     OUT1["Per dataset: cellRegistered_*.mat, logFile_*.txt, figures"]
     AN["After all datasets: quality checks W1-W7"]
-    OUT2["Per batch: _batch_results.csv, _batch_warnings_detail.csv, log, config"]
+    OUT2["Per batch: _batch_results.csv, _match_statistics.csv,<br/>cell maps, warnings table, log, config"]
     IN --> SCAN --> S12 --> CHK
     CHK -->|"no: next mode<br/>Translations, Rotations ±5°, ±90°, Non-rigid"| S12
     CHK -->|yes| S3 --> PS --> S45 --> OUT1
@@ -90,6 +91,7 @@ To try the tool first on the sample data that comes with CellReg, follow the
 | Document | Contents |
 |---|---|
 | [Guide](Docs/GUIDE.md) | Step by step: install, run the sample data, run your data, read the results. Start here. |
+| [Руководство (Guide in Russian)](Docs/GUIDE_ru.md) | The same guide in Russian. |
 | [Manual](Docs/MANUAL.md) | Reference: file naming, all parameters, the pipeline in detail, output files and columns, every warning, scripting, tests, known limitations. |
 | [CellReg User Manual](Docs/User%20Manual.docx) | The original CellReg manual by the Ziv lab. It explains the method and the CellReg GUI. |
 

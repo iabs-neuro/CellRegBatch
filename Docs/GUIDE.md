@@ -2,7 +2,7 @@
 
 This guide takes you from the download to a checked batch. Part 2 runs the
 sample data and takes about 5 minutes. The [Manual](MANUAL.md) gives the
-details of each step.
+details of each step. Русская версия: [GUIDE_ru.md](GUIDE_ru.md).
 
 CellRegBatch runs [CellReg](https://github.com/zivlab/CellReg) (Sheintuch et
 al., 2017) on many animals. To understand what CellReg does and how to read
@@ -152,8 +152,7 @@ output folder. To keep old results, copy them to another folder first.
 3. Check the table:
    - each animal has the expected number of sessions;
    - **Unparsed files** is 0, or you know which files are not session files.
-4. Clear **Run** for each animal that you do not want to process. Do not clear
-   all of them: an empty selection runs all animals.
+4. Clear **Run** for each animal that you do not want to process.
 5. On the **Run & Results** tab, click **Run batch**.
 6. To stop early, click **Stop**. The batch finishes the current animal and
    then stops.
@@ -188,7 +187,8 @@ Open the dataset folder and the figure for each red warning:
 | W7 sess count | – | Is a session file missing or extra? |
 
 [Manual, section 6](MANUAL.md#6-quality-warnings) gives the exact rule of
-each warning. Note: with 5 sessions per animal, warnings W2, W3b and W5b
+each warning. For each fired warning, `_batch_warnings_detail.csv` gives the
+session, the value and the limit. Note: with 5 sessions per animal, warnings W2, W3b and W5b
 cannot fire. The manual explains why.
 
 When a dataset looks wrong, you can:
@@ -206,21 +206,29 @@ When a dataset looks wrong, you can:
 
 ## Part 7. Use the registration
 
-Each dataset folder has one `cellRegistered_*.mat` file. The batch saves the
-CellReg result under the variable name `crs`. (The CellReg GUI uses the name
-`cell_registered_struct`. The fields are the same.)
+Each dataset folder has one `cellRegistered_*.mat` file. It holds the CellReg
+result in the variable `cell_registered_struct`, as in the CellReg GUI.
 
 ```matlab
 f = dir(fullfile(demo_in, 'Matching', 'DEMO_M01', 'cellRegistered_*.mat'));
 s = load(fullfile(f(1).folder, f(1).name));
-map = s.crs.cell_to_index_map;       % registered cells x sessions
-in_all = sum(all(map > 0, 2))        % cells found in all sessions
+map = s.cell_registered_struct.cell_to_index_map;   % registered cells x sessions
+in_all = sum(all(map > 0, 2))                         % cells found in all sessions
 ```
 
 `map(i, j)` is the number of registered cell `i` in session `j`, in the order
-of the footprints in that session's input file. 0 means that the cell was not
-found in that session. [Manual, section 7](MANUAL.md#7-using-the-results)
-shows two ways to compute the fraction of tracked cells.
+of the footprints in the input file of that session. 0 means that the cell was
+not found in that session.
+
+The output folder also has two tables for the whole batch:
+
+- `<animal>_cellmap.csv`, for example `DEMO_M01_cellmap.csv`: the same map as
+  a CSV file. Use it in Python, R or Excel.
+- `_match_statistics.csv`: for each animal, the number of cells found in all
+  sessions, in all sessions but one, and so on down to one session. It also
+  gives two fractions of tracked cells.
+  [Manual, section 5.3](MANUAL.md#53-_match_statisticscsv) explains the
+  columns.
 
 ## Part 8. Look at an earlier batch again
 

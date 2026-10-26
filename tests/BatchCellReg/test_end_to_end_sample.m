@@ -2,6 +2,40 @@ function tests = test_end_to_end_sample
     tests = functiontests(localfunctions);
 end
 
+function test_runs_on_shipped_cellreg_sample_data(testCase)
+    % SampleData (5 sessions of one mouse from CellReg, 2.35 um/px as in
+    % CellReg/demo.m) ships with the repository, so this test runs anywhere.
+    repo_root = fullfile(fileparts(mfilename('fullpath')), '..', '..');
+    addpath(genpath(fullfile(repo_root, 'CellReg')));
+    addpath(genpath(fullfile(repo_root, 'Helper')));
+    addpath(genpath(fullfile(repo_root, 'BatchCellReg')));
+
+    in = fullfile(tempdir, ['BatchCellReg_demo_' datestr(now,'HHMMSS')]);
+    mkdir(in);
+    cleanup = onCleanup(@() rmdir(in, 's'));
+    % The scanner needs <EXP>_<ANIMAL>_<SESSION>.mat names.
+    for k = 1:5
+        copyfile(fullfile(repo_root, 'SampleData', sprintf('spatial_footprints_%02d.mat', k)), ...
+                 fullfile(in, sprintf('DEMO_M01_%dD.mat', k)));
+    end
+
+    cfg = batch_default_config();
+    cfg.cellreg.microns_per_pixel = 2.35;
+    cfg.cellreg.use_parallel_processing = false;
+    summary = batch_run(in, cfg);
+
+    verifyEqual(testCase, summary.n_succeeded, 1);
+    verifyEqual(testCase, summary.n_failed, 0);
+    r = summary.results(1);
+    verifyEqual(testCase, r.sessions, {'1D','2D','3D','4D','5D'});
+    verifyGreaterThan(testCase, r.match_stats(2), 0);
+    verifyTrue(testCase, r.chosen_fpr <= cfg.p_same_tuning.fpr_max || r.p_same_unreachable);
+    out = fullfile(summary.output_dir, 'DEMO_M01');
+    verifyNumElements(testCase, dir(fullfile(out, 'cellRegistered_*.mat')), 1);
+    verifyNumElements(testCase, dir(fullfile(out, 'logFile_*.txt')), 1);
+    verifyNotEmpty(testCase, dir(fullfile(out, 'Figures', '*.png')));
+end
+
 function test_runs_on_sample_data_our(testCase)
     repo_root = fullfile(fileparts(mfilename('fullpath')), '..', '..');
     sample_dir = fullfile(repo_root, 'SampleDataOur');

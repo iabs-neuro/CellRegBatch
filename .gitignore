@@ -9,3 +9,7 @@
 **/Matching/
 tests/BatchCellReg/fixtures/flat_folder/
 tests/BatchCellReg/fixtures/tiny_sessions/
+
+# IDE and local logs
+.idea/
+*.log

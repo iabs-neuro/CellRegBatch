@@ -300,24 +300,26 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
         plot_all_registered_projections(sfp_c, opt_map, figures_dir, fig_vis));
 
     % --- assemble and save vendor struct ---
-    crs = struct();
-    crs.cell_to_index_map = opt_map;
-    crs.cell_scores = cell_scores';
-    crs.true_positive_scores = cs_pos';
-    crs.true_negative_scores = cs_neg';
-    crs.exclusivity_scores = cs_excl';
-    crs.p_same_registered_pairs = p_same_pairs';
-    crs.is_cell_in_overlapping_FOV = is_in_FOV';
-    crs.registered_cells_centroids = reg_centroids';
-    crs.centroid_locations_corrected = cl_c';
-    crs.spatial_footprints_corrected = sfp_c';
-    crs.alignment_x_translations = alignment_translations(1, :);
-    crs.alignment_y_translations = alignment_translations(2, :);
+    % Same variable name as the CellReg GUI and demo.m, so code written for
+    % their cellRegistered_*.mat files reads the batch output unchanged.
+    cell_registered_struct = struct();
+    cell_registered_struct.cell_to_index_map = opt_map;
+    cell_registered_struct.cell_scores = cell_scores';
+    cell_registered_struct.true_positive_scores = cs_pos';
+    cell_registered_struct.true_negative_scores = cs_neg';
+    cell_registered_struct.exclusivity_scores = cs_excl';
+    cell_registered_struct.p_same_registered_pairs = p_same_pairs';
+    cell_registered_struct.is_cell_in_overlapping_FOV = is_in_FOV';
+    cell_registered_struct.registered_cells_centroids = reg_centroids';
+    cell_registered_struct.centroid_locations_corrected = cl_c';
+    cell_registered_struct.spatial_footprints_corrected = sfp_c';
+    cell_registered_struct.alignment_x_translations = alignment_translations(1, :);
+    cell_registered_struct.alignment_y_translations = alignment_translations(2, :);
     if strcmp(alignment_type, 'Translations and Rotations')
-        crs.alignment_rotations = alignment_translations(3, :);
+        cell_registered_struct.alignment_rotations = alignment_translations(3, :);
     end
-    crs.adjustment_x_zero_padding = adj_pad(1, :);
-    crs.adjustment_y_zero_padding = adj_pad(2, :);
+    cell_registered_struct.adjustment_x_zero_padding = adj_pad(1, :);
+    cell_registered_struct.adjustment_y_zero_padding = adj_pad(2, :);
 
     stamp = datestr(now, 'yyyymmdd_HHMMss');
     if cfg.cellreg.write_to_file
@@ -329,16 +331,21 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
         for oi = 1:numel(stale)
             delete(fullfile(out_subdir, stale(oi).name));
         end
-        save(fullfile(out_subdir, ['cellRegistered_' stamp '.mat']), 'crs', '-v7.3');
+        save(fullfile(out_subdir, ['cellRegistered_' stamp '.mat']), 'cell_registered_struct', '-v7.3');
+        % Plain-CSV copy of the cell map for tools outside MATLAB: rows =
+        % registered cells, columns = sessions, value = cell index in that
+        % session's input file, 0 = not found. Kept next to the dataset
+        % folders so one folder holds the maps of the whole batch.
+        writematrix(opt_map, fullfile(fileparts(out_subdir), [dataset.dataset_id '_cellmap.csv']));
         if strcmp(best_model, 'Spatial correlation')
             save_log_file(out_subdir, file_paths, microns_per_pixel, ax, ay, ...
                 alignment_type, ref_idx, max_dist, n_bins, best_model, init_thresh, ...
-                'Probabilistic', best_model, p_same_thr, opt_map, crs, '', ...
+                'Probabilistic', best_model, p_same_thr, opt_map, cell_registered_struct, '', ...
                 unc_sc, fpr_sc, tpr_sc, MSE_sc);
         else
             save_log_file(out_subdir, file_paths, microns_per_pixel, ax, ay, ...
                 alignment_type, ref_idx, max_dist, n_bins, best_model, init_thresh, ...
-                'Probabilistic', best_model, p_same_thr, opt_map, crs, '', ...
+                'Probabilistic', best_model, p_same_thr, opt_map, cell_registered_struct, '', ...
                 unc_cd, fpr_cd, tpr_cd, MSE_cd);
         end
     end

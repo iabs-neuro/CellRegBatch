@@ -31,9 +31,24 @@ function test_runs_on_shipped_cellreg_sample_data(testCase)
     verifyGreaterThan(testCase, r.match_stats(2), 0);
     verifyTrue(testCase, r.chosen_fpr <= cfg.p_same_tuning.fpr_max || r.p_same_unreachable);
     out = fullfile(summary.output_dir, 'DEMO_M01');
-    verifyNumElements(testCase, dir(fullfile(out, 'cellRegistered_*.mat')), 1);
+    f = dir(fullfile(out, 'cellRegistered_*.mat'));
+    verifyNumElements(testCase, f, 1);
     verifyNumElements(testCase, dir(fullfile(out, 'logFile_*.txt')), 1);
     verifyNotEmpty(testCase, dir(fullfile(out, 'Figures', '*.png')));
+
+    % Same variable name as the CellReg GUI, so scripts written for GUI
+    % output read the batch output unchanged.
+    s = load(fullfile(f(1).folder, f(1).name));
+    verifyEqual(testCase, fieldnames(s), {'cell_registered_struct'});
+    map = s.cell_registered_struct.cell_to_index_map;
+    verifyEqual(testCase, readmatrix(fullfile(summary.output_dir, 'DEMO_M01_cellmap.csv')), map);
+
+    T = readtable(summary.match_stats_csv);
+    verifyEqual(testCase, height(T), 1);
+    verifyEqual(testCase, T.n_cells, size(map, 1));
+    verifyEqual(testCase, [T.in_5_sessions, T.in_4_sessions, T.in_3_sessions, ...
+        T.in_2_sessions, T.in_1_sessions], r.match_stats(2:end));
+    verifyEqual(testCase, T.in_5_sessions, sum(all(map > 0, 2)));
 end
 
 function test_explicit_empty_selection_runs_nothing(testCase)

@@ -10,7 +10,7 @@ function summary = batch_run(input_folder, cfg, opts)
 %                          non-skipped datasets. Present but empty: none.
 %
 %   Returns summary struct: results, anomalies, output_dir, log_file, results_csv,
-%   detail_csv, n_succeeded, n_failed, n_with_warnings, stopped.
+%   detail_csv, match_stats_csv, n_succeeded, n_failed, n_with_warnings, stopped.
 
     if nargin < 3; opts = struct(); end
     if ~isfield(opts, 'live_log_callback'); opts.live_log_callback = []; end
@@ -51,7 +51,10 @@ function summary = batch_run(input_folder, cfg, opts)
         if ~exist(sub, 'dir'); mkdir(sub); end
         try
             r = run_single_dataset(d, cfg, sub, logger);
-            logger.info(d.dataset_id, 'done (%d cells)', r.match_stats(1));
+            logger.info(d.dataset_id, 'done (%d cells; in %s sessions: %s)', ...
+                r.match_stats(1), ...
+                strjoin(arrayfun(@num2str, numel(r.sessions):-1:1, 'UniformOutput', false), '/'), ...
+                strjoin(arrayfun(@num2str, r.match_stats(2:end), 'UniformOutput', false), '/'));
         catch ME
             r = struct();
             r.dataset_id = d.dataset_id;
@@ -68,6 +71,8 @@ function summary = batch_run(input_folder, cfg, opts)
     anomalies = detect_anomalies(results, at);
 
     [results_csv, detail_csv] = export_results(results, anomalies, output_dir);
+    match_stats_csv = fullfile(output_dir, '_match_statistics.csv');
+    write_cell_csv(match_statistics_table(results), match_stats_csv);
 
     n_succeeded = sum(arrayfun(@(r) isempty(r.error), results));
     n_failed    = numel(results) - n_succeeded;
@@ -86,6 +91,7 @@ function summary = batch_run(input_folder, cfg, opts)
         'log_file', log_file, ...
         'results_csv', results_csv, ...
         'detail_csv', detail_csv, ...
+        'match_stats_csv', match_stats_csv, ...
         'n_succeeded', n_succeeded, ...
         'n_failed', n_failed, ...
         'n_with_warnings', n_warned, ...

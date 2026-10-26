@@ -6,6 +6,12 @@ function [spatial_footprints_corrected,centroid_locations_corrected,...
     reference_session_index,alignment_type,sufficient_correlation_centroids,...
     sufficient_correlation_footprints,use_parallel_processing,varargin)
 
+% MODIFIED in CellRegBatch (github.com/iabs-neuro/CellRegBatch), 2026-10-19:
+% the five blocking warndlg() calls are commented out, because a modal
+% dialog stops an unattended batch. Each one already had an equal warning()
+% on the line above it. Search for "batch wrapper" to find the changes.
+% Everything else is unchanged from CellReg v1.6.0 (github.com/zivlab/CellReg).
+
 % This function recieves the spatial footprints from different sessions and
 % finds the optimal alignment between their FOV's. This is the first step
 % after loading the data, and it includes finding the optimal overall

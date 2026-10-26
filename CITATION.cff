@@ -1,0 +1,53 @@
+cff-version: 1.2.0
+message: >-
+  CellRegBatch is a batch layer on top of CellReg. The registration method
+  and most of the code are CellReg's. If you use this software, please cite
+  the CellReg paper given under preferred-citation.
+title: CellRegBatch
+type: software
+authors:
+  - family-names: Plusnin
+    given-names: Viktor
+    affiliation: >-
+      Institute for Advanced Brain Studies, Lomonosov Moscow State University
+repository-code: "https://github.com/iabs-neuro/CellRegBatch"
+license: GPL-2.0-only
+keywords:
+  - calcium imaging
+  - cell registration
+  - neuron tracking
+  - CellReg
+  - MATLAB
+references:
+  - type: software
+    title: CellReg
+    version: 1.6.0
+    authors:
+      - name: Ziv lab, Weizmann Institute of Science
+    repository-code: "https://github.com/zivlab/CellReg"
+preferred-citation:
+  type: article
+  title: Tracking the Same Neurons across Multiple Days in Ca2+ Imaging Data
+  authors:
+    - family-names: Sheintuch
+      given-names: Liron
+    - family-names: Rubin
+      given-names: Alon
+    - family-names: Brande-Eilat
+      given-names: Noa
+    - family-names: Geva
+      given-names: Nitzan
+    - family-names: Sadeh
+      given-names: Noa
+    - family-names: Pinchasof
+      given-names: Or
+    - family-names: Ziv
+      given-names: Yaniv
+  journal: Cell Reports
+  volume: 21
+  issue: 4
+  start: 1102
+  end: 1115
+  year: 2017
+  month: 10
+  doi: 10.1016/j.celrep.2017.10.013

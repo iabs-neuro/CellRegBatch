@@ -1,55 +1,171 @@
-# Cell registration across multiple sessions in large-scale calcium imaging data
-This package is an implementation of a probabilistic approach for tracking the same neurons (cell registration) across multiple sessions 
-in Ca2+ imaging data. The package includes a GUI that supports the entire registration procedure. 
+# CellRegBatch
 
-For more information contact lironsheintuch@gmail.com or join our [slack channel](https://cellreg.slack.com).
+**Batch cell registration across calcium-imaging sessions, built on [CellReg](https://github.com/zivlab/CellReg).**
 
-## Setting up the repository
-We encourage the use of official versions (e.g., v1.6.0) for easier debugging processes. Switch to the releases tab on GitHub and checkout the latest version.
+CellRegBatch runs CellReg on many animals in one go. You point it at a folder
+of session files. It groups the sessions by animal into datasets, registers
+each dataset with CellReg, flags the datasets whose registration looks
+unreliable, and writes summary tables.
 
-1. Cloning:
-`git clone https://github.com/zivlab/CellReg.git`
-2. Checkout version:
-`git checkout v<major>.<minor>.<bugfix> (e.g., v1.6.0)`
-3. Run `CellReg_setup.m`
+> **Credit.** The cell-registration method and most of the code in this
+> repository are **CellReg**, by Liron Sheintuch, Yaniv Ziv and colleagues
+> (Ziv lab, Weizmann Institute of Science). This repository is a fork of
+> [zivlab/CellReg](https://github.com/zivlab/CellReg) v1.6.0. We add a batch
+> layer and a GUI for it on top. We do not change the registration
+> algorithm. **If you use CellRegBatch, please cite the CellReg paper**
+> (see [How to cite](#how-to-cite)).
 
-*CellReg version v1.5.5 includes a fix to an important issue with FOV alignment that was introduced into CellReg in version update v1.5.0 on March 2022.*
-*This issue may have resulted in some cases in cells being cut off or disappearing from specific sessions, especially if there are relatively large translations/rotations across sessions in the data.*
-*The issue is relevant for everyone who has used any version between v1.5.0-v1.5.3.* 
-*In cases where versions between v1.5.0-v1.5.3 were used, it is recommended to switch to a new version (v1.5.5 and onward) and to re-register the data and verify that the same results are obtained.*
+## What the batch layer adds
 
-## Usage and documentation
-To run the cell registration procedure you can either use the full GUI version or access the API directly.
-To use the GUI run *GUI\CellReg.m*.
-An example of how to use the API is provided in the file *CellReg\demo.m*.
+CellReg registers one animal at a time, and its GUI asks the user to make a
+choice at each stage. That is a good way to check one animal carefully. It is
+slow for a study with dozens of animals. CellRegBatch makes those choices with
+fixed rules and records each one:
 
+- **Folder scan.** It reads the experiment, animal and session from each file
+  name (for example `CC_H02_1D.mat`). All sessions of one animal form a
+  dataset.
+- **No dialogs.** It runs CellReg stages 1–5 for each dataset without user
+  input. If one dataset fails, it records the error and continues with the
+  next.
+- **Alignment fallback.** If an alignment mode gives a poor result, it tries
+  the next one: Translations → Translations and Rotations (±5°) → ±90° →
+  Non-rigid.
+- **Automatic P_same threshold.** It keeps the CellReg default of 0.5. It
+  raises the threshold only when the estimated false-positive rate is above a
+  target (0.03 by default).
+- **Quality warnings.** It runs 12 checks (W1–W7) on each dataset. Some compare
+  the dataset with the rest of the batch. Each check gives red, yellow or no
+  flag.
+- **Outputs.** For each dataset you get the usual CellReg outputs
+  (`cellRegistered_*.mat`, `logFile_*.txt`, all stage figures). For the batch
+  you get a results table, a warnings table, a log and the exact config.
+- **GUI.** Three tabs: Setup, Parameters, Run & Results. The GUI can reload a
+  saved results table.
 
-The inputs for the cell registration method are the matrices of spatial footprints of cellular activity (ROIs) of the cells that were detected separately in the different sessions. 
-The matrix of the spatial footprints of each session should be of size NxMxK, where N is the number of neurons, M is the number of pixels in the y axis and K is the number of pixels in the x axis.
+```mermaid
+flowchart TD
+    IN["Input folder: one .mat file per session<br/>EXP_MOUSE_1D.mat, EXP_MOUSE_2D.mat, ..."]
+    SCAN["Scan: group sessions by experiment and animal"]
+    S12["CellReg stages 1-2: load and align sessions"]
+    CHK{"Alignment good?"}
+    S3["CellReg stage 3: probabilistic model<br/>CellReg picks centroid-distance or spatial-correlation model"]
+    PS["Choose P_same: 0.5, or higher if FPR > 0.03"]
+    S45["CellReg stages 4-5: initial registration, clustering"]
+    OUT1["Per dataset: cellRegistered_*.mat, logFile_*.txt, figures"]
+    AN["After all datasets: quality checks W1-W7"]
+    OUT2["Per batch: _batch_results.csv, _batch_warnings_detail.csv, log, config"]
+    IN --> SCAN --> S12 --> CHK
+    CHK -->|"no: next mode<br/>Translations, Rotations ±5°, ±90°, Non-rigid"| S12
+    CHK -->|yes| S3 --> PS --> S45 --> OUT1
+    S45 --> AN --> OUT2
+    classDef cellreg fill:#dbeafe,stroke:#1e40af,color:#000
+    classDef batch fill:#fef3c7,stroke:#92400e,color:#000
+    class S12,S3,S45,OUT1 cellreg
+    class IN,SCAN,CHK,PS,AN,OUT2 batch
+```
 
-The main output for the cell registration method is the obtained mapping of cell identity across all registered sessions.
-Other outputs include the cell scores, the probability for each cell-pair to the be the same cell, the spatial footprints of the cells after the alignment step, and a log file with all the relevant information regarding the data, registration
-configurations, and a summary of the registration results and quality. In addition, important figures are saved automatically in a figures directory. 
+Blue boxes are CellReg code. Yellow boxes are the batch layer.
 
+![Run & Results tab after a batch](Docs/images/gui_results.png)
 
-An example data set and cell registration results are provided in the *SampleData* directory.
+## Quick start
 
+1. Clone the repository:
+   `git clone https://github.com/iabs-neuro/CellRegBatch.git`
+2. In MATLAB, go to the repository folder.
+3. Start the GUI: `run BatchCellReg_GUI/BatchCellReg.m`
+4. On the **Setup** tab, select the folder with your session files. Click
+   **Scan**.
+5. On the **Parameters** tab, set **Microns per pixel** for your microscope.
+6. On the **Run & Results** tab, click **Run batch**.
 
-For more information refer to the user manual found in the *Docs* directory.
+The results go to the `Matching` subfolder of the input folder.
 
-## Main stages of the cell registration procedure
+To try the tool first on the sample data that comes with CellReg, follow the
+[Guide](Docs/GUIDE.md). It takes about 5 minutes.
 
-1. Loading the spatial footprints of cellular activity from the different sessions.
+## Documentation
 
-2. Aligning all sessions to a reference coordinate system using rigid-body transformation.
+| Document | Contents |
+|---|---|
+| [Guide](Docs/GUIDE.md) | Step by step: install, run the sample data, run your data, read the results. Start here. |
+| [Manual](Docs/MANUAL.md) | Reference: file naming, all parameters, the pipeline in detail, output files and columns, every warning, scripting, tests, known limitations. |
+| [CellReg User Manual](Docs/User%20Manual.docx) | The original CellReg manual by the Ziv lab. It explains the method and the CellReg GUI. |
 
-3. Computing a probabilistic model of the spatial footprints similarities
-of neighboring cell-pairs from different sessions using the centroid
-distances and spatial correlations.
+## Requirements
 
-4. Obtaining an initial cell registration according to an optimized registration threshold.
+- MATLAB R2020a or newer. The tests pass on R2020a and R2025b. We checked the
+  GUI on R2025b.
+- Image Processing Toolbox, Statistics and Machine Learning Toolbox and
+  Optimization Toolbox. CellReg needs them.
+- Parallel Computing Toolbox is optional. It speeds up alignment. Without it,
+  turn off **Use parallel processing** on the Parameters tab.
 
-5. Obtaining the final cell registration based on a clustering algorithm.
+## Input
 
-## References
-Sheintuch, L., Rubin, A., Brande-Eilat, N., Geva, N., Sadeh, N., Pinchasof, O., Ziv, Y. (2017). Tracking the Same Neurons across Multiple Days in Ca2+ Imaging Data. *Cell Reports*, 21(4), pp. 1102–1115. doi: 10.1016/j.celrep.2017.10.013.
+One `.mat` file per session. The first variable in the file is the array of
+spatial footprints, size N×Y×X (cells × height × width). This is the CellReg
+input format. File names must follow the pattern
+`<EXPERIMENT>_<ANIMAL>_<SESSION>...mat`, for example `CC_H02_1D_filters.mat`.
+The [Manual](Docs/MANUAL.md#1-input-files) gives the exact rule. The `Helper`
+folder has CellReg's converters from Suite2p, CNMF-E and Inscopix outputs.
+
+## The original CellReg tools are still here
+
+This fork keeps the full CellReg package:
+
+- the CellReg GUI: `GUI/CellReg.m`;
+- the CellReg API example: `CellReg/demo.m`;
+- the sample data and sample results: `SampleData/`;
+- the CellReg setup script: `CellReg_setup.m`. It adds the CellReg folders to
+  the MATLAB path and saves the path.
+
+Use the CellReg GUI when you want to inspect one animal by hand. For questions
+about the method or the CellReg GUI, see the
+[CellReg repository](https://github.com/zivlab/CellReg).
+
+## Changes to the original CellReg code
+
+We changed one CellReg file:
+
+- `CellReg/align_images.m`: five blocking `warndlg` dialogs are commented
+  out, because a modal dialog stops an unattended batch. Each dialog already
+  had an equal `warning()` on the line above, so the message still goes to the
+  MATLAB console. The file header records the change.
+
+All other files in `CellReg/`, `GUI/`, `Helper/`, `SampleData/` and
+`Docs/User Manual.docx` are as in CellReg v1.6.0. The batch layer is in
+`BatchCellReg/`, `BatchCellReg_GUI/` and `tests/`.
+
+## How to cite
+
+Please cite the CellReg paper. It describes the method that does the
+registration:
+
+> Sheintuch, L., Rubin, A., Brande-Eilat, N., Geva, N., Sadeh, N., Pinchasof,
+> O., & Ziv, Y. (2017). Tracking the same neurons across multiple days in Ca²⁺
+> imaging data. *Cell Reports*, 21(4), 1102–1115.
+> https://doi.org/10.1016/j.celrep.2017.10.013
+
+If the batch layer matters for your methods (for example the automatic P_same
+rule or the quality checks), you can also cite this repository:
+`https://github.com/iabs-neuro/CellRegBatch`. GitHub's **Cite this
+repository** button uses [`CITATION.cff`](CITATION.cff).
+
+## License
+
+GNU General Public License v2 ([LICENSE.txt](LICENSE.txt)), the same license
+as CellReg. The batch layer is released under the same license.
+
+## Authors and contact
+
+- **CellReg** (method and core code): Ziv lab, Weizmann Institute of Science.
+  See [zivlab/CellReg](https://github.com/zivlab/CellReg).
+- **Batch layer**: Viktor Plusnin, Lab of Neuronal Intelligence, Institute
+  for Advanced Brain Studies, Lomonosov Moscow State University.
+
+Report problems with the batch layer in the
+[issues](https://github.com/iabs-neuro/CellRegBatch/issues) of this
+repository. Problems that also happen in the original CellReg GUI belong to
+the [CellReg repository](https://github.com/zivlab/CellReg/issues).

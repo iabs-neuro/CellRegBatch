@@ -46,7 +46,33 @@ accepted. The batch converts it to `double`.
 
 To convert outputs of other tools to this format, use the CellReg helpers in
 `Helper/`: `format_conversion_Suite2p_CNMF_e.m`,
-`format_conversion_inscopix.m`, `s2pToCellReg.m`.
+`format_conversion_inscopix.m`, `s2pToCellReg.m`. They are CellReg's code:
+`format_conversion_Suite2p_CNMF_e.m` reads the MATLAB version of CNMF-E,
+opens a file dialog, and names its output `converted_...`, so rename the
+output files afterwards (1.2).
+
+**From CaImAn (Python).** CaImAn stores the footprints as `A`, a sparse
+matrix of pixels × cells, with the pixels in Fortran (column-major) order.
+Reshape it in Python before you save the file:
+
+```python
+import numpy as np, scipy.io
+d1, d2 = dims                                  # image height and width
+fp = A.toarray().reshape(d1, d2, -1, order='F').transpose(2, 0, 1)   # cells x d1 x d2
+scipy.io.savemat('CA1_M01_1D.mat', {'footprints': fp.astype('float32')})
+```
+
+`float32` halves the file size. A `.mat` file of format 5 (the `savemat`
+default) holds at most 2 GB per variable. If you save only the accepted
+components (`idx_components`), the cell numbers in the results refer to that
+filtered list (7.1).
+
+The batch converts the footprints to `double`: one session of 600 × 600 pixels
+with 500 cells takes 1.4 GB of memory. To use less memory, crop the field of
+view to the part with cells, the same crop for all sessions of an animal.
+
+If the first variable is not a 3-D array, the dataset fails with an error that
+names the file and the size of the variable.
 
 ### 1.2 File names
 
@@ -189,6 +215,16 @@ addpath(genpath('CellReg')); addpath(genpath('Helper')); addpath(genpath('BatchC
 
 cfg = batch_default_config();             % or: cfg = config_from_json('my_config.json');
 cfg.cellreg.microns_per_pixel = 1.6;      % set this for your microscope
+cfg.cellreg.expected_n_sessions = 4;      % set this for your experiment
+cfg.cellreg.use_parallel_processing = false;   % if you have no Parallel Computing Toolbox
+
+% Check the folder first (the Scan of the GUI):
+scan = scan_input_folder('D:\data\5_Filters');
+disp(scan.unparsed)                       % files whose names do not match 1.2
+disp(scan.session_names)                  % the cell map columns (1.5)
+c = check_session_counts(scan, cfg.cellreg.expected_n_sessions);
+disp([{c.dataset_id}' {c.text}'])         % the Check column of the GUI
+
 summary = batch_run('D:\data\5_Filters', cfg);
 
 % Run only some datasets:
@@ -196,18 +232,24 @@ opts = struct('selected_datasets', {{'CC_H02', 'CC_H03'}});
 summary = batch_run('D:\data\5_Filters', cfg, opts);
 ```
 
+`batch_run` prints the batch log to the command window. CellReg itself also
+prints progress bars there. The same log, without the progress bars, is in the
+`_batch_log_*.txt` file. `scan_input_folder` and `check_session_counts` are
+part of the scripting interface.
+
 `batch_run(input_folder, cfg, opts)` uses the `input_folder` argument. It
 does not read `cfg.io.input_folder`.
 
 | `opts` field | Meaning |
 |---|---|
 | `selected_datasets` | Cell array of dataset names to run. If `opts` does not have this field, all datasets that are not skipped run. An empty cell array runs no dataset. |
-| `live_log_callback` | Function handle `@(line)`. It receives each log line. |
+| `live_log_callback` | Function handle `@(line)`. It receives each log line. Default: print the line. `[]`: print nothing. |
 | `stop_check` | Function handle that returns `true` to stop before the next dataset. |
 
 | `summary` field | Meaning |
 |---|---|
 | `results` | Struct array, one element per processed dataset (see 4.8). |
+| `session_names` | The session names of the batch: the columns of every cell map (1.5). |
 | `anomalies` | `.flags` (six warnings per dataset: 0 = none, 1 = yellow, 2 = red), `.metrics` (the values behind them), `.details` (one element per fired rule, the rows of 5.2), `.batch` (median and limits of the match comparison). |
 | `output_dir`, `log_file`, `results_csv`, `detail_csv`, `match_stats_csv`, `warnings_png` | Paths of the output folder and files. `warnings_png` is empty if the figure failed. |
 | `n_succeeded`, `n_failed`, `n_with_warnings` | Counts. A dataset counts as "with warnings" if any warning is yellow or red. |
@@ -229,7 +271,7 @@ To change a parameter that the GUI does not show:
 
 | Parameter | GUI | Default | Meaning |
 |---|---|---|---|
-| `cellreg.microns_per_pixel` | yes | 1.6 | Pixel size of your images in µm. **Set it for your microscope.** All distances and the model use it. |
+| `cellreg.microns_per_pixel` | yes | 1.6 | Pixel size of your images in µm. **Set it for your microscope.** All distances and the model use it. 1.6 is the value of our setup. Take yours from the microscope calibration (for CaImAn, the `dxy` parameter). If you downsampled the images by a factor k, multiply by k. The log writes the value of each run. |
 | `cellreg.alignment_type` | yes | `Translations` | First mode of the alignment cascade (4.3). `Translations and Rotations` starts at the second mode. `Non-rigid` uses only the last mode. |
 | `cellreg.maximal_rotation` | yes | 5 | Rotation range in degrees for the second cascade mode. |
 | `cellreg.reference_session_index` | yes | 1 | Number of the reference session in session order (1.3). |
@@ -363,6 +405,11 @@ false positives". The batch computes it the same way as
 chosen model, at the threshold rounded to 2 decimals. The batch stores the
 value without the final rounding to 0.01 (column `chosen_fpr_pct`, in
 percent).
+
+The threshold is a bin centre of CellReg's P_same grid, for example 0.5005
+for 0.5. CellReg's `logFile_*.txt`, the batch log and `_batch_results.csv`
+show it rounded to 2 decimals, as CellReg does. In your methods, write the
+rounded value (for example "P_same threshold 0.5").
 
 The code is in `BatchCellReg/choose_p_same_by_fpr.m`.
 
@@ -518,8 +565,10 @@ dataset.
 - `<dataset>_cellmap.csv`, in the output folder: the cell map
   (`cell_to_index_map`, see 7.1) as a CSV file without a header. Each row is
   one registered cell. Each column is one session name of the batch, in
-  session order (1.5). The value is the number of the cell in the input file
-  of that session. 0 = not found. A missing session is a column of zeros.
+  session order (1.5). The log line `cell map columns` and
+  `summary.session_names` list the columns. The value is the number of the
+  cell in the input file of that session, counted from 1. 0 = not found. A
+  missing session is a column of zeros.
 - `cellRegistered_*.mat`: the CellReg registration result (7.1). It has the
   dataset's own sessions only, without zero columns.
 - `logFile_*.txt`: the CellReg log file, written by CellReg's
@@ -609,7 +658,17 @@ Outside MATLAB, use `CC_H02_cellmap.csv` in the output folder. It holds the
 same map, with a zero column for each missing session (1.5).
 
 `map(i, j)` is the index of registered cell `i` in session `j`, in the order
-of the input footprints. 0 means that the cell was not found in that session.
+of the input footprints, counted from 1 (subtract 1 in Python). 0 means that
+the cell was not found in that session.
+
+The `.mat` file has format 7.3 (HDF5). `scipy.io.loadmat` cannot read it. In
+Python, use `h5py` and transpose the map:
+
+```python
+import h5py
+with h5py.File('cellRegistered_20261029_154458.mat', 'r') as f:
+    cell_map = f['cell_registered_struct']['cell_to_index_map'][()].T   # cells x sessions
+```
 The other fields (`cell_scores`, `p_same_registered_pairs`,
 `spatial_footprints_corrected`, and so on) are described in the CellReg
 User Manual.
@@ -651,7 +710,8 @@ fails.
 - The unit tests use small synthetic data. They take a few seconds.
 - `test_runs_on_shipped_cellreg_sample_data` runs the full batch on
   `SampleData/` (5 sessions of one mouse) and on a copy of the mouse without
-  session `3D` (1.5). It takes 4–5 minutes.
+  session `3D` (1.5). It takes about 6 minutes. All tests take about 7
+  minutes.
 - `test_model_can_be_set_in_config` runs 2 sessions with the
   centroid-distance model set in the config.
 - `test_runs_on_sample_data_our` needs a folder `SampleDataOur/` with our
@@ -684,3 +744,7 @@ macOS, and MATLAB R2021a on Linux. The GUI is not tested there.
   cannot remake the figures from it. Run the dataset again to get them.
 - **Operating system.** The tests run on Linux, Windows and macOS (section
   8). We used the GUI on Windows only.
+- **Another CellReg on the MATLAB path.** If the original CellReg is on your
+  saved path, MATLAB has two copies of its functions. The GUI and the script
+  in 2.2 put this repository first on the path, so its copy runs. To check,
+  run `which align_images -all`: the first line must be in this repository.

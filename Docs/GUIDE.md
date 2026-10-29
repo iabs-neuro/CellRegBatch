@@ -32,7 +32,7 @@ datasets in one folder.
 You do not need to install anything. The GUI adds the necessary folders to
 the MATLAB path when it starts.
 
-To check the installation, run the tests (about 3 minutes):
+To check the installation, run the tests (about 7 minutes):
 
 ```matlab
 results = runtests('tests/BatchCellReg');
@@ -106,6 +106,20 @@ copies with such names.
     same data, made with the CellReg settings, are in
     `SampleData/SampleResults/Figures/`.
 
+**Without the GUI.** After step 1, run this instead of steps 2–9. It prints
+the batch log in the Command Window.
+
+```matlab
+addpath(genpath('CellReg')); addpath(genpath('Helper')); addpath(genpath('BatchCellReg'));
+cfg = batch_default_config();
+cfg.cellreg.microns_per_pixel = 2.35;
+cfg.cellreg.use_parallel_processing = false;
+summary = batch_run(demo_in, cfg);
+summary.results(1).match_stats(1:2)      % registered cells, cells in all sessions
+```
+
+[Manual, section 2.2](MANUAL.md#22-script) describes the script interface.
+
 With one dataset, the **Low match** warning cannot compare the dataset with
 the batch. The comparison needs at least 5 datasets with the expected number
 of sessions.
@@ -115,7 +129,8 @@ of sessions.
 1. Save the spatial footprints of each session to a `.mat` file. The first
    variable in the file must be an N×Y×X array: N cells, Y pixels in height,
    X pixels in width. The `Helper/` folder has CellReg converters for Suite2p,
-   CNMF-E and Inscopix outputs.
+   CNMF-E and Inscopix outputs. For CaImAn, use the Python code in
+   [Manual, section 1.1](MANUAL.md#11-file-content).
 2. Name each file `EXPERIMENT_ANIMAL_SESSION.mat`. Examples:
    - `CC_H02_1D.mat`, `CC_H02_2D.mat`, … (experiment `CC`, animal `H02`)
    - `NOF_F07_1D_filters.mat` (text after the session is ignored)
@@ -135,7 +150,8 @@ of sessions.
 ## Part 4. Set the parameters
 
 1. Set **Microns per pixel** for your microscope. A wrong value gives wrong
-   distances and a poor model.
+   distances and a poor model. The default 1.6 is the value of our setup, not
+   of yours.
 2. Keep **Maximal distance (um)** at 15, unless you have a reason to change
    it.
 3. Keep **Registration model** at `auto`. CellReg then chooses the model
@@ -229,6 +245,7 @@ When a dataset looks wrong, you can:
 | Message | Likely cause | Action |
 |---|---|---|
 | `All alignment modes failed ...` | A session does not show the same field of view as the reference session. | Look at the session. Remove it, or use another reference session. |
+| `...: the first variable, ..., is a ... Expected spatial footprints as a 3-D array ...` | The file does not hold N×Y×X footprints, for example a pixels × cells matrix. | Convert the file (Part 3, step 1). |
 | `start parameter must satisfy bounds` or `Cannot fit a beta distribution ...` | CellReg cannot fit its model. In our data this happened in recordings with very few cells. | Exclude the dataset, or register it by hand. |
 
 ## Part 7. Use the registration
@@ -276,6 +293,7 @@ The table shows the results and the warnings again.
 | A red **Check** cell after **Scan** | The animal has another number of sessions than **Expected sessions per mouse**. | Check the file names. Keep **Run** to match it with a red **Sessions** warning, or clear **Run**. |
 | The session line lists more session names than expected | Animals use different session names, for example `1D` and `1T`. | Rename the files so that all animals use the same session names. |
 | **Load results CSV...** says "older version" | The file was made before the warnings review. | Run the batch again. |
+| A script run ends with 0 datasets and the warning `No dataset found` | No file name matches the rule. The log lists the files. | Rename the files (Part 3). |
 | A file `_batch_results_<time>.csv` appears | `_batch_results.csv` was open in another program. | Close the file in Excel before you run the batch. |
 | An error about `gcp` or `parpool` | The Parallel Computing Toolbox is not installed. | Clear **Use parallel processing**. |
 | MATLAB runs out of memory | Each parallel worker keeps its own data. | Run `parpool(4)` first, or clear **Use parallel processing**. |

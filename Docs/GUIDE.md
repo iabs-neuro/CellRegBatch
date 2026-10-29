@@ -189,6 +189,10 @@ output folder. To keep old results, copy them to another folder first.
 9. To stop early, click **Stop**. The batch finishes the current animal and
    then stops.
 
+You can run the batch again for some animals only, for example after you fix
+their files. The tables and the figure still show the other animals of
+earlier runs. To start from nothing, delete the output folder.
+
 If MATLAB runs out of memory, use fewer parallel workers. Before you click
 **Run batch**, run `parpool(4)` in the Command Window. Or clear **Use parallel
 processing**.

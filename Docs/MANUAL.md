@@ -57,7 +57,12 @@ Reshape it in Python before you save the file:
 
 ```python
 import numpy as np, scipy.io
-d1, d2 = dims                                  # image height and width
+from caiman.source_extraction.cnmf.cnmf import load_CNMF
+
+cnm = load_CNMF('CA1_M01_day1.hdf5')           # your saved CaImAn result
+A, (d1, d2) = cnm.estimates.A, cnm.estimates.dims
+if cnm.estimates.idx_components is not None:   # keep the accepted components only
+    A = A[:, cnm.estimates.idx_components]
 fp = A.toarray().reshape(d1, d2, -1, order='F').transpose(2, 0, 1)   # cells x d1 x d2
 scipy.io.savemat('CA1_M01_1D.mat', {'footprints': fp.astype('float32')})
 ```
@@ -216,7 +221,7 @@ addpath(genpath('CellReg')); addpath(genpath('Helper')); addpath(genpath('BatchC
 cfg = batch_default_config();             % or: cfg = config_from_json('my_config.json');
 cfg.cellreg.microns_per_pixel = 1.6;      % set this for your microscope
 cfg.cellreg.expected_n_sessions = 4;      % set this for your experiment
-cfg.cellreg.use_parallel_processing = false;   % if you have no Parallel Computing Toolbox
+% cfg.cellreg.use_parallel_processing = false;   % without the Parallel Computing Toolbox
 
 % Check the folder first (the Scan of the GUI):
 scan = scan_input_folder('D:\data\5_Filters');
@@ -252,7 +257,8 @@ does not read `cfg.io.input_folder`.
 | `session_names` | The session names of the batch: the columns of every cell map (1.5). |
 | `anomalies` | `.flags` (six warnings per dataset: 0 = none, 1 = yellow, 2 = red), `.metrics` (the values behind them), `.details` (one element per fired rule, the rows of 5.2), `.batch` (median and limits of the match comparison). |
 | `output_dir`, `log_file`, `results_csv`, `detail_csv`, `match_stats_csv`, `warnings_png` | Paths of the output folder and files. `warnings_png` is empty if the figure failed. |
-| `n_succeeded`, `n_failed`, `n_with_warnings` | Counts. A dataset counts as "with warnings" if any warning is yellow or red. |
+| `n_succeeded`, `n_failed`, `n_with_warnings` | Counts for this run. A dataset counts as "with warnings" if any warning is yellow or red. |
+| `n_kept` | Number of datasets from earlier runs in the tables (5.1). |
 | `stopped` | `true` if the batch stopped early. |
 
 ---
@@ -459,6 +465,8 @@ hidden figures fill the memory during a long batch.
     ├── _batch_warnings_detail.csv             one row per fired warning rule
     ├── _match_statistics.csv                  cells found in k sessions, per dataset
     ├── _batch_warnings.png                    picture of all warnings
+    ├── _batch_results.mat                     results of all runs, for the next run
+    ├── _cellmap_columns.txt                   session names = cell map columns
     ├── <dataset>_cellmap.csv                  cell map of each dataset
     └── <dataset>/                             for example CC_H02/
         ├── cellRegistered_YYYYMMDD_HHMMSS.mat
@@ -468,7 +476,15 @@ hidden figures fill the memory during a long batch.
 
 Each run overwrites `_batch_config.json`, `_batch_results.csv`,
 `_batch_warnings_detail.csv`, `_match_statistics.csv` and
-`_batch_warnings.png`. The CSV files round numbers to 3 decimals. If a CSV
+`_batch_warnings.png`.
+
+**The tables cover the whole output folder.** A run of some datasets keeps
+the other datasets of earlier runs in the tables and in the figure. The batch
+takes their results from `_batch_results.mat`. A dataset whose folder you
+deleted is left out. The log lists the datasets from earlier runs, and warns
+if they were registered with other settings. The batch comparison of
+`low_match` then also uses them. To start again from nothing, delete the
+output folder. The CSV files round numbers to 3 decimals. If a CSV
 file is open in another program (for example Excel), the batch tries again 3
 times. Then it writes a copy with a
 time stamp in the name and gives a MATLAB warning.
@@ -565,8 +581,8 @@ dataset.
 - `<dataset>_cellmap.csv`, in the output folder: the cell map
   (`cell_to_index_map`, see 7.1) as a CSV file without a header. Each row is
   one registered cell. Each column is one session name of the batch, in
-  session order (1.5). The log line `cell map columns` and
-  `summary.session_names` list the columns. The value is the number of the
+  session order (1.5). `_cellmap_columns.txt` (one name per line), the log
+  line `cell map columns` and `summary.session_names` list the columns. The value is the number of the
   cell in the input file of that session, counted from 1. 0 = not found. A
   missing session is a column of zeros.
 - `cellRegistered_*.mat`: the CellReg registration result (7.1). It has the

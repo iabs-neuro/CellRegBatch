@@ -59,7 +59,12 @@ CellReg в папке `Helper/`: `format_conversion_Suite2p_CNMF_e.m`,
 
 ```python
 import numpy as np, scipy.io
-d1, d2 = dims                                  # высота и ширина изображения
+from caiman.source_extraction.cnmf.cnmf import load_CNMF
+
+cnm = load_CNMF('CA1_M01_day1.hdf5')           # ваш сохранённый результат CaImAn
+A, (d1, d2) = cnm.estimates.A, cnm.estimates.dims
+if cnm.estimates.idx_components is not None:   # только принятые компоненты
+    A = A[:, cnm.estimates.idx_components]
 fp = A.toarray().reshape(d1, d2, -1, order='F').transpose(2, 0, 1)   # клетки x d1 x d2
 scipy.io.savemat('CA1_M01_1D.mat', {'footprints': fp.astype('float32')})
 ```
@@ -218,7 +223,7 @@ addpath(genpath('CellReg')); addpath(genpath('Helper')); addpath(genpath('BatchC
 cfg = batch_default_config();             % или: cfg = config_from_json('my_config.json');
 cfg.cellreg.microns_per_pixel = 1.6;      % задайте для своего микроскопа
 cfg.cellreg.expected_n_sessions = 4;      % задайте для своего эксперимента
-cfg.cellreg.use_parallel_processing = false;   % если нет Parallel Computing Toolbox
+% cfg.cellreg.use_parallel_processing = false;   % если нет Parallel Computing Toolbox
 
 % Сначала проверьте папку (это Scan из GUI):
 scan = scan_input_folder('D:\data\5_Filters');
@@ -254,7 +259,8 @@ summary = batch_run('D:\data\5_Filters', cfg, opts);
 | `session_names` | Названия сессий батча: столбцы каждой карты клеток (1.5). |
 | `anomalies` | `.flags` (шесть варнингов на датасет: 0 — нет, 1 — жёлтый, 2 — красный), `.metrics` (значения за ними), `.details` (по элементу на сработавшее правило, строки из 5.2), `.batch` (медиана и пороги сравнения с батчем). |
 | `output_dir`, `log_file`, `results_csv`, `detail_csv`, `match_stats_csv`, `warnings_png` | Пути к выходной папке и файлам. `warnings_png` пустой, если картинка не построилась. |
-| `n_succeeded`, `n_failed`, `n_with_warnings` | Счётчики. Датасет считается «с варнингами», если хотя бы один варнинг жёлтый или красный. |
+| `n_succeeded`, `n_failed`, `n_with_warnings` | Счётчики этого прогона. Датасет считается «с варнингами», если хотя бы один варнинг жёлтый или красный. |
+| `n_kept` | Число датасетов из прежних прогонов в таблицах (5.1). |
 | `stopped` | `true`, если батч остановили раньше. |
 
 ---
@@ -459,6 +465,8 @@ CellReg кластеризует клетки вероятностным под�
     ├── _batch_warnings_detail.csv             строка на сработавшее правило
     ├── _match_statistics.csv                  клетки, найденные в k сессиях
     ├── _batch_warnings.png                    картинка всех варнингов
+    ├── _batch_results.mat                     результаты всех прогонов, для следующего
+    ├── _cellmap_columns.txt                   названия сессий = столбцы карт клеток
     ├── <датасет>_cellmap.csv                  карта клеток каждого датасета
     └── <датасет>/                             например CC_H02/
         ├── cellRegistered_YYYYMMDD_HHMMSS.mat
@@ -468,6 +476,14 @@ CellReg кластеризует клетки вероятностным под�
 
 Каждый прогон перезаписывает `_batch_config.json`, `_batch_results.csv`,
 `_batch_warnings_detail.csv`, `_match_statistics.csv` и `_batch_warnings.png`.
+
+**Таблицы описывают всю выходную папку.** Прогон части датасетов оставляет в
+таблицах и на картинке остальные датасеты прежних прогонов. Их результаты
+батч берёт из `_batch_results.mat`. Датасет, чью папку вы удалили, в таблицы
+не попадает. Лог перечисляет датасеты из прежних прогонов и предупреждает,
+если они были зарегистрированы с другими настройками. Сравнение с батчем в
+`low_match` тогда тоже учитывает их. Чтобы начать с нуля, удалите выходную
+папку.
 В CSV файлах числа округлены до 3 знаков после запятой. Если CSV файл открыт в
 другой программе (например в Excel), батч пробует ещё 3 раза. Затем он пишет
 копию с меткой времени в имени и выдаёт предупреждение MATLAB.
@@ -564,8 +580,8 @@ CellReg кластеризует клетки вероятностным под�
 - `<датасет>_cellmap.csv` в выходной папке: карта клеток (`cell_to_index_map`,
   см. 7.1) как CSV файл без заголовка. Строка — одна зарегистрированная
   клетка. Столбец — одно название сессии батча, в порядке сессий (1.5).
-  Столбцы перечислены в строке лога `cell map columns` и в
-  `summary.session_names`. Значение — номер клетки во входном файле этой
+  Столбцы перечислены в `_cellmap_columns.txt` (по названию в строке), в
+  строке лога `cell map columns` и в `summary.session_names`. Значение — номер клетки во входном файле этой
   сессии, считая с 1. 0 — не найдена. Пропущенная сессия — столбец нулей.
 - `cellRegistered_*.mat`: результат регистрации CellReg (7.1). В нём только
   собственные сессии датасета, без нулевых столбцов.
@@ -666,8 +682,9 @@ map = s.cell_registered_struct.cell_to_index_map;   % клетки x сесси�
 import h5py
 with h5py.File('cellRegistered_20261029_154458.mat', 'r') as f:
     cell_map = f['cell_registered_struct']['cell_to_index_map'][()].T   # клетки x сессии
-``` Остальные
-поля (`cell_scores`, `p_same_registered_pairs`,
+```
+
+Остальные поля (`cell_scores`, `p_same_registered_pairs`,
 `spatial_footprints_corrected` и другие) описаны в CellReg User Manual.
 
 ### 7.2 Процент клеток, найденных во всех сессиях

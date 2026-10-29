@@ -1,0 +1,50 @@
+# Runs the MATLAB test suite (tests/BatchCellReg) on Linux, Windows and
+# macOS with the latest MATLAB, and on Linux with the oldest release the
+# MATLAB actions support. Public repositories get the MATLAB licence free.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: MATLAB ${{ matrix.release }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            release: latest
+          - os: windows-latest
+            release: latest
+          - os: macos-latest
+            release: latest
+          - os: ubuntu-latest
+            release: R2021a
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
+          # CellReg needs these three toolboxes.
+          products: >
+            Image_Processing_Toolbox
+            Statistics_and_Machine_Learning_Toolbox
+            Optimization_Toolbox
+          cache: true
+
+      - uses: matlab-actions/run-tests@v3
+        with:
+          select-by-folder: tests/BatchCellReg
+          test-results-junit: test-results/results.xml
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.release }}
+          path: test-results/

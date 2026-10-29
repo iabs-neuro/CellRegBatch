@@ -381,6 +381,7 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger, session_n
     result.missing_sessions = missing_sessions;
     result.n_cells_per_session = stats.n_cells_per_session;
     result.match_stats = stats.match_stats;
+    result.linked_fraction = stats.linked_fraction;
     result.maximal_cross_correlation = max_xcorr;
     result.alignment_translations = alignment_translations;
     result.alignment_shift_px = shifts_px;

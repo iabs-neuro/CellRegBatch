@@ -58,6 +58,7 @@ function test_runs_on_shipped_cellreg_sample_data(testCase)
     % Percent with 3 decimals.
     verifyEqual(testCase, T.pct_in_all(1), round(100 * r.match_stats(2) / r.match_stats(1), 3));
     verifyEqual(testCase, summary.anomalies.flags(1).session_count, 0);
+    verifyNumElements(testCase, r.linked_fraction, 5);
 
     % --- DEMO_M02: session 3D missing ---
     r2 = summary.results(2);

@@ -22,4 +22,12 @@ function test_counts_cells_present_in_k_sessions(testCase)
     verifyEqual(testCase, s.match_stats, [5 2 1 2]);
     verifyEqual(testCase, s.n_cells_per_session, [4 2 4]);
     verifyEqual(testCase, s.pct_in_all, 2/5);
+    % Session 1 has cells 1,2,3,4 (rows 1,2,3,4): rows 1,2,4 are also elsewhere.
+    verifyEqual(testCase, s.linked_fraction, [3/4 2/2 3/4]);
+end
+
+function test_linked_fraction_of_empty_session_is_nan(testCase)
+    s = collect_match_stats([1 2 0; 3 4 0]);
+    verifyEqual(testCase, s.linked_fraction(1:2), [1 1]);
+    verifyTrue(testCase, isnan(s.linked_fraction(3)));
 end

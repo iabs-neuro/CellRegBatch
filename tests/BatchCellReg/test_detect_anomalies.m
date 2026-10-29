@@ -34,6 +34,7 @@ function r = good(id)
         'p_same_unreachable', false, ...
         'chosen_fpr', 0.02, ...
         'forced_low_xcorr', false, ...
+        'linked_fraction', [0.9 0.85 0.88 0.9 0.87], ...
         'error', '');
 end
 
@@ -182,6 +183,28 @@ function test_low_match_needs_five_comparable_datasets(tc)
     a = detect_anomalies(rs, thresholds());
     verifyEqual(tc, [a.flags.low_match], [0 0 0 0]);
     verifyTrue(tc, isnan(a.batch.match_median));
+end
+
+function test_isolated_session_is_found_in_a_batch_of_one(tc)
+    % Session 5D: only 18 % of its cells appear in another session, against
+    % ~90 % for the others (a mirrored session in the demo batch).
+    r = good('A'); r.linked_fraction = [0.92 0.95 0.94 0.89 0.18];
+    a = detect_anomalies(r, thresholds());
+    verifyEqual(tc, a.flags.low_match, 2);
+    d = details_of(a, 'A', 'low_match');
+    verifyEqual(tc, d.session, '5D');
+    verifyEqual(tc, d.value, 0.18 / 0.92, 'AbsTol', 1e-12);
+    verifyEqual(tc, d.threshold, 0.4);
+    r.linked_fraction = [0.92 0.95 0.94 0.89 0.5];
+    a = detect_anomalies(r, thresholds());
+    verifyEqual(tc, a.flags.low_match, 1);
+end
+
+function test_session_link_needs_three_sessions(tc)
+    r = good('A'); r.sessions = {'1D', '2D'}; r.linked_fraction = [0.9 0.2];
+    t = thresholds(); t.expected_n_sessions = 2;
+    a = detect_anomalies(r, t);
+    verifyEqual(tc, a.flags.low_match, 0);
 end
 
 function test_failed_dataset_gets_no_warning(tc)

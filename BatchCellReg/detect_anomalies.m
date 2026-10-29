@@ -12,13 +12,16 @@ function out = detect_anomalies(results, thresh)
 %     alignment      low cross-correlation or forced alignment (red),
 %                    large shift (yellow)                               yellow/red
 %     model_fit      high model MSE; FPR target not reached (red)       yellow/red
-%     low_match      no cell found in all sessions (red); match % far
-%                    below the batch median (robust z)                  yellow/red
+%     low_match      no cell found in all sessions (red); one session
+%                    whose cells are rarely found in the other sessions;
+%                    match % far below the batch median (robust z)      yellow/red
 %   Severity codes: 0 = none, 1 = yellow, 2 = red.
 %
 %   The batch comparison of low_match uses median and MAD, so one bad
 %   dataset cannot hide itself by widening the spread. It needs at least
-%   MIN_BATCH datasets with the expected session count.
+%   MIN_BATCH datasets with the expected session count, and most of them
+%   must be good. The session-link rule needs no batch: it compares the
+%   sessions of one dataset (3 or more sessions).
 %
 %   out.details: one element per fired rule: dataset_id, session ('-' when
 %   the rule is about the whole dataset), warning, rule, value, threshold
@@ -37,7 +40,7 @@ function out = detect_anomalies(results, thresh)
     flags = repmat(cell2struct(num2cell(zeros(1, numel(names))), names, 2), 1, n);
     metrics = repmat(struct('median_cells', NaN, 'worst_session_ratio', NaN, ...
         'min_xcorr', NaN, 'max_shift_px', NaN, 'model_mse', NaN, ...
-        'match_pct', NaN, 'match_z', NaN), 1, n);
+        'match_pct', NaN, 'match_z', NaN, 'worst_link_ratio', NaN), 1, n);
     details = struct('dataset_id', {}, 'session', {}, 'warning', {}, 'rule', {}, ...
         'value', {}, 'threshold', {}, 'severity', {});
 
@@ -165,6 +168,22 @@ function out = detect_anomalies(results, thresh)
         metrics(k).match_pct = 100 * match(k);
         if comparable(k) && ~isnan(match_scale)
             metrics(k).match_z = (match(k) - batch.match_median) / match_scale;
+        end
+        % A session whose cells rarely appear in any other session is
+        % usually misaligned or shows another field of view. With two
+        % sessions both have the same linked cells, so the rule needs three.
+        lf = [];
+        if isfield(r, 'linked_fraction'); lf = r.linked_fraction(:)'; end
+        if numel(lf) >= 3 && median(lf, 'omitnan') > 0
+            [v, i] = min(lf);
+            ratio = v / median(lf, 'omitnan');
+            metrics(k).worst_link_ratio = ratio;
+            [sev, b] = level(ratio, t.session_link_yellow, t.session_link_red, 'low');
+            if sev
+                [flags(k), details] = fire(flags(k), details, id, session_name(r, i), ...
+                    'low_match', 'cells found in other sessions, worst session / median', ...
+                    ratio, b, sev);
+            end
         end
         if r.match_stats(2) == 0
             [flags(k), details] = fire(flags(k), details, id, '-', 'low_match', ...

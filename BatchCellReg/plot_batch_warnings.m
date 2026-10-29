@@ -11,7 +11,7 @@ function plot_batch_warnings(results, anomalies, thresh, png_path)
     n = numel(results);
     row_px = 20;
     fig = figure('Visible', 'off', 'Color', 'w', 'Units', 'pixels', ...
-        'Position', [50 50 1500 max(300, 170 + row_px * n)]);
+        'Position', [50 50 1700 max(300, 170 + row_px * n)]);
     cleanup = onCleanup(@() delete(fig));
     W = fig.Position(3); H = fig.Position(4);
     px = @(x, y, w, h) [x / W, y / H, w / W, h / H];
@@ -39,7 +39,7 @@ function plot_batch_warnings(results, anomalies, thresh, png_path)
         'FontSize', 12, 'FontWeight', 'bold', 'Interpreter', 'none', 'String', ...
         sprintf('Batch warnings: %d datasets, %d red, %d yellow only, %d failed', ...
         n, n_red, n_yellow, sum(~ok)));
-    annotation(fig, 'textbox', px(20, 4, 1460, 22), 'EdgeColor', 'none', ...
+    annotation(fig, 'textbox', px(20, 4, W - 40, 22), 'EdgeColor', 'none', ...
         'FontSize', 8, 'Interpreter', 'none', 'String', ['Grid: grey = no warning, ' ...
         'yellow = check, red = problem, dark grey = dataset failed. Dot plots: dashed ' ...
         'lines = yellow and red limits; dot colour = how the value compares with them. ' ...
@@ -82,6 +82,8 @@ function plot_batch_warnings(results, anomalies, thresh, png_path)
         'Lowest cross-correlation', [m.min_xcorr], t.xcorr_yellow, t.xcorr_red, 'low', []
         'Largest shift (px)', [m.max_shift_px], t.shift_yellow_px, NaN, 'high', []
         'Model fit error (MSE)', [m.model_mse], t.mse_yellow, t.mse_red, 'high', []
+        'Session link: worst / median', [m.worst_link_ratio], t.session_link_yellow, ...
+            t.session_link_red, 'low', []
         'Match % (all sessions)', [m.match_pct], 100 * b.match_yellow, ...
             100 * b.match_red, 'low', sev(:, strcmp(names, 'low_match'))'
         };
@@ -95,7 +97,8 @@ function plot_batch_warnings(results, anomalies, thresh, png_path)
         for k = 1:n; plot(ax, [1e-9 1e9], [k k], '-', 'Color', [0.93 0.93 0.93]); end
         lim = [0, max([v(isfinite(v)), ylw, rlim, 0]) * 1.12];
         if lim(2) <= 0; lim(2) = 1; end
-        if strcmp(ttl, 'Worst session / median') || strcmp(ttl, 'Lowest cross-correlation')
+        if any(strcmp(ttl, {'Worst session / median', 'Lowest cross-correlation', ...
+                'Session link: worst / median'}))
             lim = [0 max(1, lim(2))];
         end
         log_x = strcmp(ttl, 'Median cells per session');

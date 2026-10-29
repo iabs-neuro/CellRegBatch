@@ -214,6 +214,7 @@ function build_parameters_tab(app)
     y = add_pair(t, 'Alignment: shift (px) >',         'shift',     y);
     y = add_pair(t, 'Model fit: MSE >',                'mse',       y);
     y = add_pair(t, 'Low match: z below batch >',      'match_z',   y);
+    y = add_pair(t, 'Low match: session link <',       'session_link', y);
     uilabel(t, 'Position', [495 y 360 22], 'FontColor', [0.3 0.3 0.3], ...
         'Text', 'Sessions: set "Expected sessions" on the Setup tab.');
 

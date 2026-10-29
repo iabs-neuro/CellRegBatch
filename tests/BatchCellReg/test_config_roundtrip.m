@@ -31,6 +31,7 @@ function test_defaults_have_expected_keys(testCase)
     verifyEqual(testCase, a.shift_yellow_px, 30);
     verifyEqual(testCase, [a.mse_red, a.mse_yellow], [0.15 0.1]);
     verifyEqual(testCase, [a.match_z_red, a.match_z_yellow], [3 2]);
+    verifyEqual(testCase, [a.session_link_red, a.session_link_yellow], [0.4 0.6]);
 end
 
 function test_roundtrip_preserves_values(testCase)

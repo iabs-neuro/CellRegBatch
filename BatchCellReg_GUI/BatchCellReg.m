@@ -35,6 +35,19 @@ function refocus(fig)
     end
 end
 
+function info_button(parent, pos, key, ttl)
+    %INFO_BUTTON A "?" button that explains one field (text: parameter_info).
+    uibutton(parent, 'Position', pos, 'Text', '?', 'FontWeight', 'bold', ...
+        'Tooltip', 'What is this?', ...
+        'ButtonPushedFcn', @(s,e) show_info(ancestor(s, 'figure'), key, ttl));
+end
+
+function show_info(fig, key, ttl)
+    m = parameter_info();
+    if isKey(m, key); txt = m(key); else; txt = 'No help text for this field.'; end
+    uialert(fig, txt, ttl, 'Icon', 'info');
+end
+
 function build_setup_tab(app)
     t = uitab(app.tabs, 'Title', 'Setup');
     % Keep the top row below y+h = 550: the tab header takes ~25 px of the
@@ -45,13 +58,28 @@ function build_setup_tab(app)
         'ButtonPushedFcn', @(s,e) on_browse(app.fig));
     uibutton(t, 'Position', [720 525 80 22], 'Text', 'Scan', ...
         'ButtonPushedFcn', @(s,e) on_scan(app.fig));
+    info_button(t, [810 525 22 22], 'input_folder', 'Input folder');
 
     app.ui.output_label = uilabel(t, 'Position', [20 497 800 22], ...
         'Text', 'Output: <choose folder first>');
 
-    app.ui.datasets_table = uitable(t, 'Position', [20 60 840 430], ...
-        'ColumnName', {'Run','Dataset','# sessions','sessions'}, ...
-        'ColumnEditable', [true false false false]);
+    uilabel(t, 'Position', [20 469 190 22], 'Text', 'Expected sessions per mouse:');
+    f = uieditfield(t, 'numeric', 'Position', [210 469 50 22], ...
+        'Limits', [1 Inf], 'RoundFractionalValues', 'on', ...
+        'Value', app.config.cellreg.expected_n_sessions);
+    % Same config field as the JSON file: Load config and Reset update it.
+    f.Tag = 'cellreg.expected_n_sessions';
+    f.ValueChangedFcn = @(s,e) on_expected_changed(ancestor(s, 'figure'), s.Value);
+    info_button(t, [265 469 22 22], 'cellreg.expected_n_sessions', 'Expected sessions');
+
+    app.ui.session_check_label = uilabel(t, 'Position', [20 443 840 22], ...
+        'Text', 'Scan the folder to check the session count of each dataset.');
+
+    app.ui.datasets_table = uitable(t, 'Position', [20 60 840 378], ...
+        'ColumnName', {'Run','Dataset','# sessions','Sessions','Check'}, ...
+        'ColumnWidth', {40, 120, 75, 330, 'auto'}, ...
+        'ColumnFormat', {'logical', 'char', 'shortG', 'char', 'char'}, ...
+        'ColumnEditable', [true false false false false]);
 
     app.ui.unparsed_label = uilabel(t, 'Position', [20 30 800 22], 'Text', 'Unparsed files: 0');
 
@@ -100,42 +128,94 @@ function on_scan(fig)
     for k = 1:numel(app.scan.datasets)
         d = app.scan.datasets(k);
         sids = strjoin({d.sessions.session_id}, ', ');
-        rows(end+1, :) = {~d.skip, d.dataset_id, numel(d.sessions), sids}; %#ok<AGROW>
+        rows(end+1, :) = {~d.skip, d.dataset_id, numel(d.sessions), sids, ''}; %#ok<AGROW>
     end
     app.ui.datasets_table.Data = rows;
     app.ui.unparsed_label.Text = sprintf('Unparsed files: %d', numel(app.scan.unparsed));
     setappdata(fig, 'app', app);
+    update_session_check(fig);
+end
+
+function on_expected_changed(fig, value)
+    set_path(fig, 'cellreg.expected_n_sessions', value);
+    update_session_check(fig);
+end
+
+function update_session_check(fig)
+    %UPDATE_SESSION_CHECK Fill the Check column and the summary line.
+    app = getappdata(fig, 'app');
+    if isempty(app.scan) || isempty(app.scan.datasets); return; end
+    expected = app.config.cellreg.expected_n_sessions;
+    checks = check_session_counts(app.scan, expected);
+    tbl = app.ui.datasets_table;
+    rows = tbl.Data;
+    for k = 1:numel(checks); rows{k, 5} = checks(k).text; end
+    tbl.Data = rows;
+    bad = find(~[checks.ok]);
+    try
+        removeStyle(tbl);
+        if ~isempty(bad)
+            addStyle(tbl, uistyle('BackgroundColor', [1 0.75 0.75]), 'cell', [bad(:), 5 * ones(numel(bad), 1)]);
+        end
+    catch
+        % uistyle needs R2019b; the Check text still says what is wrong.
+    end
+    names = strjoin(app.scan.session_names, ', ');
+    n_run = sum(~[app.scan.datasets.skip]);
+    if isempty(bad)
+        txt = sprintf('Sessions in this folder: %s. All %d datasets have %d sessions.', ...
+            names, n_run, expected);
+    else
+        txt = sprintf(['Sessions in this folder: %s. %d of %d datasets do not have %d ' ...
+            'sessions: they will be matched and get a red Sessions warning.'], ...
+            names, numel(bad), n_run, expected);
+    end
+    app.ui.session_check_label.Text = txt;
+    if isempty(bad)
+        app.ui.session_check_label.FontColor = [0 0 0];
+    else
+        app.ui.session_check_label.FontColor = [0.75 0 0];
+    end
 end
 
 function build_parameters_tab(app)
     t = uitab(app.tabs, 'Title', 'Parameters');
-    y = 530;
+    y = 525;
 
-    y = section_header(t, 'CellReg core', y);
+    y = section_header(t, 'CellReg core', 20, y);
     y = add_num (t, 'Microns per pixel',       'cellreg.microns_per_pixel',       y);
     y = add_drop(t, 'Alignment type',          'cellreg.alignment_type',          y, ...
                  {'Translations','Translations and Rotations','Non-rigid'});
     y = add_num (t, 'Maximal rotation (deg)',  'cellreg.maximal_rotation',        y);
     y = add_num (t, 'Reference session',       'cellreg.reference_session_index', y);
     y = add_num (t, 'Maximal distance (um)',   'cellreg.maximal_distance_um',     y);
-    y = add_drop_disabled(t, 'Registration approach',   'cellreg.registration_approach',   y, ...
-                 {'Probabilistic','Simple threshold'});
-    y = add_drop_disabled(t, 'Initial registration',    'cellreg.initial_registration_type', y, ...
+    y = add_num (t, 'Alignment gate (min. xcorr)', 'cellreg.alignment_min_xcorr', y);
+    y = add_drop(t, 'Registration model',      'cellreg.initial_registration_type', y, ...
                  {'auto','Spatial correlation','Centroid distance'});
+    y = add_drop_disabled(t, 'Registration approach', 'cellreg.registration_approach', y, ...
+                 {'Probabilistic','Simple threshold'});
 
-    y = section_header(t, 'P_same auto-tune', y);
+    y = section_header(t, 'P_same auto-tune', 20, y);
     y = add_num (t, 'FPR max',                 'p_same_tuning.fpr_max',           y);
 
-    y = section_header(t, 'Anomaly thresholds', y);
-    y = add_num (t, 'z-score threshold',       'anomaly_thresholds.z_threshold',  y);
-    y = add_num (t, 'Max translation (px)',    'anomaly_thresholds.max_translation_px', y);
-    y = add_num (t, 'Min cross-correlation',   'anomaly_thresholds.min_xcorr',    y);
-    y = add_num (t, 'Max model MSE',           'anomaly_thresholds.max_mse',      y);
-
-    y = section_header(t, 'I/O', y);
+    y = section_header(t, 'I/O', 20, y);
     y = add_bool(t, 'Write to file',           'cellreg.write_to_file',           y);
     y = add_drop(t, 'Figures visibility',      'cellreg.figures_visibility',      y, {'off','on'});
-    y = add_bool(t, 'Use parallel processing', 'cellreg.use_parallel_processing', y);
+    add_bool(t, 'Use parallel processing',     'cellreg.use_parallel_processing', y);
+
+    % Right column: warning thresholds, one row per rule (yellow, red).
+    y = section_header(t, 'Warning thresholds', 495, 525);
+    uilabel(t, 'Position', [695 y 55 22], 'Text', 'yellow', 'HorizontalAlignment', 'center');
+    uilabel(t, 'Position', [760 y 55 22], 'Text', 'red', 'HorizontalAlignment', 'center');
+    y = y - 26;
+    y = add_pair(t, 'Few cells: median per session <', 'few_cells', y);
+    y = add_pair(t, 'Cell drop: worst / median <',     'cell_drop', y);
+    y = add_pair(t, 'Alignment: cross-correlation <',  'xcorr',     y);
+    y = add_pair(t, 'Alignment: shift (px) >',         'shift',     y);
+    y = add_pair(t, 'Model fit: MSE >',                'mse',       y);
+    y = add_pair(t, 'Low match: z below batch >',      'match_z',   y);
+    uilabel(t, 'Position', [495 y 360 22], 'FontColor', [0.3 0.3 0.3], ...
+        'Text', 'Sessions: set "Expected sessions" on the Setup tab.');
 
     uibutton(t, 'Position', [20 20 120 24], 'Text', 'Load config...', ...
         'ButtonPushedFcn', @(s,e) on_load_cfg(ancestor(s, 'figure')));
@@ -145,8 +225,8 @@ function build_parameters_tab(app)
         'ButtonPushedFcn', @(s,e) on_reset_cfg(ancestor(s, 'figure')));
 end
 
-function y = section_header(t, label, y)
-    uilabel(t, 'Position', [20 y 800 22], 'Text', label, 'FontWeight', 'bold');
+function y = section_header(t, label, x, y)
+    uilabel(t, 'Position', [x y 360 22], 'Text', label, 'FontWeight', 'bold');
     y = y - 28;
 end
 
@@ -156,6 +236,28 @@ function y = add_num(t, label, path, y)
     f.Tag = path;
     f.ValueChangedFcn = @(s,e) set_path(ancestor(s, 'figure'), path, s.Value);
     sync_field_from_config(f);
+    info_button(t, [455 y 22 22], path, label);
+    y = y - 26;
+end
+
+function y = add_pair(t, label, rule, y)
+    %ADD_PAIR One warning rule: yellow and red limit fields side by side.
+    % The shift rule has a yellow limit only.
+    uilabel(t, 'Position', [495 y 195 22], 'Text', label);
+    if strcmp(rule, 'shift')
+        paths = {'anomaly_thresholds.shift_yellow_px'};
+    else
+        paths = {['anomaly_thresholds.' rule '_yellow'], ['anomaly_thresholds.' rule '_red']};
+    end
+    xs = [695 760];
+    for k = 1:numel(paths)
+        f = uieditfield(t, 'numeric', 'Position', [xs(k) y 55 22]);
+        f.Tag = paths{k};
+        p = paths{k};
+        f.ValueChangedFcn = @(s,e) set_path(ancestor(s, 'figure'), p, s.Value);
+        sync_field_from_config(f);
+    end
+    info_button(t, [822 y 22 22], paths{1}, label);
     y = y - 26;
 end
 
@@ -165,6 +267,7 @@ function y = add_bool(t, label, path, y)
     f.Tag = path;
     f.ValueChangedFcn = @(s,e) set_path(ancestor(s, 'figure'), path, s.Value);
     sync_field_from_config(f);
+    info_button(t, [455 y 22 22], path, label);
     y = y - 26;
 end
 
@@ -174,6 +277,7 @@ function y = add_drop(t, label, path, y, items)
     f.Tag = path;
     f.ValueChangedFcn = @(s,e) set_path(ancestor(s, 'figure'), path, s.Value);
     sync_field_from_config(f);
+    info_button(t, [455 y 22 22], path, label);
     y = y - 26;
 end
 
@@ -183,8 +287,9 @@ function y = add_drop_disabled(t, label, path, y, items)
     f.Tag = path;
     f.ValueChangedFcn = @(s,e) set_path(ancestor(s, 'figure'), path, s.Value);
     f.Enable = 'off';
-    f.Tooltip = 'Fixed in v1: GUI control reserved for future use';
+    f.Tooltip = 'The batch supports the probabilistic approach only';
     sync_field_from_config(f);
+    info_button(t, [455 y 22 22], path, label);
     y = y - 26;
 end
 
@@ -225,9 +330,15 @@ function on_load_cfg(fig)
     refocus(fig);
     if isnumeric(name); return; end
     app = getappdata(fig, 'app');
-    app.config = config_from_json(fullfile(path, name));
+    try
+        app.config = config_from_json(fullfile(path, name));
+    catch ME
+        uialert(fig, ME.message, 'Load config');
+        return
+    end
     setappdata(fig, 'app', app);
     refresh_param_fields(fig);
+    update_session_check(fig);
 end
 
 function on_save_cfg(fig)
@@ -243,6 +354,7 @@ function on_reset_cfg(fig)
     app.config = batch_default_config();
     setappdata(fig, 'app', app);
     refresh_param_fields(fig);
+    update_session_check(fig);
 end
 
 function refresh_param_fields(fig)
@@ -269,22 +381,25 @@ function build_run_tab(app)
 
     app.ui.log_area = uitextarea(t, 'Position', [20 320 840 194], 'Editable', 'off');
 
-    app.ui.results_table = uitable(t, 'Position', [20 80 840 230], ...
-        'ColumnName', results_table_headers(), ...
-        'ColumnFormat', {'char','numeric','numeric','numeric','numeric', ...
-                         'numeric','numeric','numeric','numeric','numeric','numeric', ...
-                         'numeric','numeric','numeric','numeric','numeric','numeric'}, ...
+    headers = results_table_headers();
+    app.ui.results_table = uitable(t, 'Position', [20 102 840 210], ...
+        'ColumnName', headers, ...
+        'ColumnWidth', [{105, 45, 55, 65, 55}, repmat({77}, 1, numel(headers) - 5)], ...
+        'ColumnFormat', [{'char'}, repmat({'shortG'}, 1, numel(headers) - 1)], ...
         'CellSelectionCallback', @(s,e) on_results_cell_selected(app.fig, e));
 
-    app.ui.decode_line = uitextarea(t, 'Position', [20 56 840 22], ...
-        'Editable', 'off', 'Value', 'Click a W cell to decode the warning.');
+    app.ui.decode_line = uitextarea(t, 'Position', [20 52 810 44], ...
+        'Editable', 'off', 'Value', 'Click a warning cell to see the rule and the value.');
+    info_button(t, [835 74 22 22], 'warnings', 'Warnings');
 
-    uibutton(t, 'Position', [20 30 160 24], 'Text', 'Export results CSV', ...
+    uibutton(t, 'Position', [20 16 160 24], 'Text', 'Export results CSV', ...
         'ButtonPushedFcn', @(s,e) on_export(app.fig, 'results'));
-    uibutton(t, 'Position', [190 30 160 24], 'Text', 'Export log TXT', ...
+    uibutton(t, 'Position', [190 16 160 24], 'Text', 'Export log TXT', ...
         'ButtonPushedFcn', @(s,e) on_export(app.fig, 'log'));
-    uibutton(t, 'Position', [360 30 160 24], 'Text', 'Open output folder', ...
+    uibutton(t, 'Position', [360 16 160 24], 'Text', 'Open output folder', ...
         'ButtonPushedFcn', @(s,e) on_open_out(app.fig));
+    uibutton(t, 'Position', [530 16 160 24], 'Text', 'Warnings figure', ...
+        'ButtonPushedFcn', @(s,e) on_show_figure(app.fig));
 
     save_app(app);
     setappdata(app.fig, 'stop_requested', false);
@@ -315,11 +430,14 @@ function on_run(fig)
     app.ui.progress_label.Text = 'running...';
     drawnow;
     summary = batch_run(folder, app.config, opts);
-    app.ui.progress_label.Text = sprintf('done: %d ok, %d failed, %d warned', ...
+    app.ui.progress_label.Text = sprintf('done: %d ok, %d failed, %d with warnings', ...
         summary.n_succeeded, summary.n_failed, summary.n_with_warnings);
 
     app = getappdata(fig, 'app');
     app.last_summary = summary;
+    app.last_details = summary.anomalies.details;
+    app.last_errors = arrayfun(@(r) r.error, summary.results, 'UniformOutput', false);
+    app.figure_path = summary.warnings_png;
     setappdata(fig, 'app', app);
     fill_results_table(fig, summary);
 end
@@ -340,17 +458,20 @@ end
 
 function fill_results_table(fig, summary)
     app = getappdata(fig, 'app');
+    [~, names] = anomaly_decode_map();
     n = numel(summary.results);
-    rows = cell(n, 17);
+    rows = cell(n, 5 + numel(names));
     for k = 1:n
         r = summary.results(k); f = summary.anomalies.flags(k);
-        if numel(r.match_stats) >= 2; pct = r.match_stats(2)/max(r.match_stats(1),1);
-        else; pct = NaN; end
-        rows(k, :) = {r.dataset_id, numel(r.sessions), r.match_stats(1), pct, r.chosen_fpr, ...
-            f.W1, f.W2, f.W2b_hard, f.W2b_rel, f.W3a, f.W3b, f.W4, f.W5a, f.W5b, f.W6a, f.W6b, f.W7};
+        m = summary.anomalies.metrics(k);
+        n_cells = 0;
+        if ~isempty(r.match_stats); n_cells = r.match_stats(1); end
+        sev = cellfun(@(nm) f.(nm), names, 'UniformOutput', false);
+        rows(k, :) = [{r.dataset_id, numel(r.sessions), n_cells, ...
+            round(m.match_pct, 1), round(100 * r.chosen_fpr, 2)}, sev];
     end
     app.ui.results_table.Data = rows;
-    apply_severity_styles(app.ui.results_table, rows, 6:17);
+    apply_severity_styles(app.ui.results_table, rows, 6:5 + numel(names), app.last_errors);
 end
 
 function on_export(fig, which)
@@ -381,14 +502,26 @@ end
 function on_open_out(fig)
     app = getappdata(fig, 'app');
     if isfield(app, 'last_summary')
-        open_folder(app.last_summary.output_dir);
+        open_path(app.last_summary.output_dir);
     elseif isfield(app, 'loaded_csv_path') && ~isempty(app.loaded_csv_path)
-        open_folder(fileparts(app.loaded_csv_path));
+        open_path(fileparts(app.loaded_csv_path));
     end
 end
 
-function open_folder(p)
-    % winopen exists on Windows only.
+function on_show_figure(fig)
+    app = getappdata(fig, 'app');
+    p = '';
+    if isfield(app, 'figure_path'); p = app.figure_path; end
+    if isempty(p) || exist(p, 'file') ~= 2
+        uialert(fig, 'No warnings figure yet. Run a batch or load a results CSV.', 'Warnings figure');
+        return
+    end
+    open_path(p);
+end
+
+function open_path(p)
+    % Opens a folder or a file with the system viewer. winopen exists on
+    % Windows only.
     if ispc
         winopen(p);
     elseif ismac
@@ -399,23 +532,27 @@ function open_folder(p)
 end
 
 function names = results_table_headers()
-%RESULTS_TABLE_HEADERS Two-line (code\nwords) column labels for results_table.
-    m = anomaly_decode_map();
-    wcodes = w_codes();
-    wtags  = {'W1','W2','W2b_h','W2b_r','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
-    names = {'Dataset','Sess','Cells','%match','FPR'};
-    for k = 1:numel(wcodes)
-        names{end+1} = sprintf('%s\n%s', wtags{k}, m(wcodes{k}).short); %#ok<AGROW>
+%RESULTS_TABLE_HEADERS Column labels: fixed columns, then the six warnings.
+    [m, order] = anomaly_decode_map();
+    names = {'Dataset', 'Sess', 'Cells', 'Match %', 'FPR %'};
+    for k = 1:numel(order)
+        names{end+1} = m(order{k}).short; %#ok<AGROW>
     end
 end
 
-function apply_severity_styles(tbl, rows, wcols)
-%APPLY_SEVERITY_STYLES Color W cells: 2=red, 1=yellow. R2020a-safe.
+function apply_severity_styles(tbl, rows, wcols, errors)
+%APPLY_SEVERITY_STYLES Color warning cells: 2 = red, 1 = yellow; failed
+%   datasets grey. uistyle needs R2019b; older releases show numbers only.
     try
         removeStyle(tbl);
         redS = uistyle('BackgroundColor', [1 0.6 0.6]);
         yelS = uistyle('BackgroundColor', [1 1 0.6]);
+        greyS = uistyle('BackgroundColor', [0.8 0.8 0.8]);
         for rr = 1:size(rows, 1)
+            if rr <= numel(errors) && ~isempty(errors{rr})
+                addStyle(tbl, greyS, 'row', rr);
+                continue
+            end
             for cc = wcols
                 v = rows{rr, cc};
                 if isequal(v, 2)
@@ -448,55 +585,82 @@ end
 
 function fill_results_from_csv(fig, r, full)
     app = getappdata(fig, 'app');
-    col = @(nm) find(strcmp(r.headers, nm), 1);
-    want = [{'dataset_id','n_sessions','n_cells','pct_in_all','chosen_fpr'}, w_codes()];
-    idx = cellfun(col, want);
+    [~, names] = anomaly_decode_map();
+    want = [{'dataset_id', 'n_sessions', 'n_cells', 'pct_in_all_of_mean', 'chosen_fpr_pct'}, names];
+    idx = cellfun(@(nm) find(strcmp(r.headers, nm), 1), want);
     n = size(r.rows, 1);
-    rows = cell(n, 17);
+    rows = cell(n, numel(want));
     for k = 1:n
-        rows{k,1} = r.rows{k, idx(1)};
-        for c = 2:17
+        rows{k, 1} = r.rows{k, idx(1)};
+        for c = 2:numel(want)
             v = str2double(r.rows{k, idx(c)});
-            if isnan(v); v = 0; end
-            rows{k,c} = v;
+            if isnan(v) && c > 5; v = 0; end
+            rows{k, c} = v;
         end
     end
+    errors = repmat({''}, 1, n);
+    ecol = find(strcmp(r.headers, 'error'), 1);
+    if ~isempty(ecol); errors = r.rows(:, ecol)'; end
+
+    % The detail file and the figure sit next to the results file.
+    folder = fileparts(full);
+    app.last_details = read_details(fullfile(folder, '_batch_warnings_detail.csv'));
+    app.last_errors = errors;
+    app.figure_path = fullfile(folder, '_batch_warnings.png');
     app.ui.results_table.Data = rows;
-    apply_severity_styles(app.ui.results_table, rows, 6:17);
+    apply_severity_styles(app.ui.results_table, rows, 6:numel(want), errors);
     app.loaded_csv_path = full;
     app.ui.progress_label.Text = sprintf('loaded %d rows from %s', n, full);
     setappdata(fig, 'app', app);
+end
+
+function d = read_details(path)
+    d = struct('dataset_id', {}, 'session', {}, 'warning', {}, 'rule', {}, ...
+        'value', {}, 'threshold', {}, 'severity', {});
+    r = parse_batch_results_csv(path, fieldnames(d)');
+    if ~r.ok; return; end
+    col = @(nm) find(strcmp(r.headers, nm), 1);
+    for k = 1:size(r.rows, 1)
+        d(end+1) = struct('dataset_id', r.rows{k, col('dataset_id')}, ...
+            'session', r.rows{k, col('session')}, 'warning', r.rows{k, col('warning')}, ...
+            'rule', r.rows{k, col('rule')}, 'value', str2double(r.rows{k, col('value')}), ...
+            'threshold', str2double(r.rows{k, col('threshold')}), ...
+            'severity', r.rows{k, col('severity')}); %#ok<AGROW>
+    end
 end
 
 function on_results_cell_selected(fig, e)
     app = getappdata(fig, 'app');
     if ~isfield(app.ui, 'decode_line'); return; end
     if isempty(e.Indices)
-        app.ui.decode_line.Value = 'Click a W cell to decode the warning.';
+        app.ui.decode_line.Value = 'Click a warning cell to see the rule and the value.';
         return
     end
     rr = e.Indices(1); cc = e.Indices(2);
-    wcodes = w_codes();
-    if cc < 6 || cc > 17
-        app.ui.decode_line.Value = 'Not a warning column.';
+    data = app.ui.results_table.Data;
+    if isempty(data) || rr > size(data, 1); return; end
+    ds = data{rr, 1};
+    [m, names] = anomaly_decode_map();
+    if isfield(app, 'last_errors') && rr <= numel(app.last_errors) && ~isempty(app.last_errors{rr})
+        app.ui.decode_line.Value = sprintf('%s failed: %s', ds, app.last_errors{rr});
         return
     end
-    m = anomaly_decode_map();
-    code = wcodes{cc - 5};
-    data = app.ui.results_table.Data;
-    sev = 0; ds = '';
-    if ~isempty(data) && rr <= size(data,1)
-        v = data{rr, cc};
-        if ~isempty(v) && isnumeric(v); sev = v; end
-        if ~isempty(data{rr,1}); ds = data{rr,1}; end
+    if cc <= 5
+        app.ui.decode_line.Value = 'Click a warning cell (Sessions to Low match) to see why it is coloured.';
+        return
     end
-    sevw = {'none','YELLOW','RED'};
-    si = max(0, min(2, round(sev))) + 1;
-    app.ui.decode_line.Value = sprintf('%s   [%s] severity = %g (%s)', ...
-        m(code).desc, ds, sev, sevw{si});
-end
-
-function c = w_codes()
-%W_CODES Canonical anomaly codes for results-table columns 6..17 (in order).
-    c = {'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
+    name = names{cc - 5};
+    lines = {sprintf('%s. %s', ds, m(name).desc)};
+    if isfield(app, 'last_details')
+        for d = app.last_details
+            if strcmp(d.dataset_id, ds) && strcmp(d.warning, name)
+                where = '';
+                if ~strcmp(d.session, '-'); where = sprintf(' (session %s)', d.session); end
+                lines{end+1} = sprintf('%s: %s = %s%s, %s limit %s.', upper(d.severity), ...
+                    d.rule, num2str(d.value, 4), where, d.severity, num2str(d.threshold, 4)); %#ok<AGROW>
+            end
+        end
+    end
+    if numel(lines) == 1; lines{end+1} = 'No warning for this dataset.'; end
+    app.ui.decode_line.Value = lines;
 end

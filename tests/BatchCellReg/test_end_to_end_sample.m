@@ -82,6 +82,23 @@ function test_runs_on_shipped_cellreg_sample_data(testCase)
     verifyEqual(testCase, p.rows{2, strcmp(p.headers, 'session_count')}, '2');
 end
 
+function test_folder_without_valid_names_warns(testCase)
+    % Files that do not match the naming rule must not end the batch
+    % silently: a MATLAB warning, and the log lists the files.
+    repo_root = fullfile(fileparts(mfilename('fullpath')), '..', '..');
+    addpath(genpath(fullfile(repo_root, 'BatchCellReg')));
+    in = fullfile(tempdir, ['BatchCellReg_names_' datestr(now,'HHMMSSFFF')]);
+    mkdir(in);
+    cleanup = onCleanup(@() rmdir(in, 's'));
+    copyfile(fullfile(repo_root, 'SampleData', 'spatial_footprints_01.mat'), ...
+             fullfile(in, 'mouse3_day1.mat'));
+    cfg = batch_default_config();
+    cfg.cellreg.use_parallel_processing = false;
+    summary = verifyWarning(testCase, @() batch_run(in, cfg, struct('live_log_callback', [])), ...
+        'BatchCellReg:NoDatasets');
+    verifyMatches(testCase, fileread(summary.log_file), 'mouse3_day1\.mat');
+end
+
 function test_model_can_be_set_in_config(testCase)
     repo_root = fullfile(fileparts(mfilename('fullpath')), '..', '..');
     addpath(genpath(fullfile(repo_root, 'CellReg')));
@@ -119,7 +136,7 @@ function test_explicit_empty_selection_runs_nothing(testCase)
     end
     cfg = batch_default_config();
     cfg.cellreg.use_parallel_processing = false;
-    summary = batch_run(in, cfg, struct('selected_datasets', {{}}));
+    summary = batch_run(in, cfg, struct('selected_datasets', {{}}, 'live_log_callback', []));
     verifyEqual(testCase, summary.n_succeeded + summary.n_failed, 0);
     verifyMatches(testCase, fileread(summary.log_file), 'DEMO_M01: skipped: not selected');
 end

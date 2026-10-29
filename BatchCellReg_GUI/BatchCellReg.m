@@ -651,7 +651,7 @@ function on_results_cell_selected(fig, e)
         return
     end
     name = names{cc - 5};
-    lines = {sprintf('%s. %s', ds, m(name).desc)};
+    lines = {};
     if isfield(app, 'last_details')
         for d = app.last_details
             if strcmp(d.dataset_id, ds) && strcmp(d.warning, name)
@@ -662,6 +662,11 @@ function on_results_cell_selected(fig, e)
             end
         end
     end
-    if numel(lines) == 1; lines{end+1} = 'No warning for this dataset.'; end
+    if isempty(lines)
+        lines = {sprintf('%s: no %s warning.', ds, m(name).short)};
+    else
+        lines = [{sprintf('%s: %s warning.', ds, m(name).short)}, lines];
+    end
+    lines{end+1} = ['What it checks: ' m(name).desc];
     app.ui.decode_line.Value = lines;
 end

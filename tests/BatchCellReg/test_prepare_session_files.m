@@ -28,6 +28,24 @@ function test_double_passthrough_unchanged(testCase)
     verifyEqual(testCase, fp{1}, matrix_data);
 end
 
+function test_pixels_by_cells_matrix_is_refused_with_file_name(testCase)
+    % A CaImAn-style A (pixels x cells) must stop with a message that names
+    % the file, not with a CellReg index error later.
+    tmp = [tempname '.mat'];
+    cleanup = onCleanup(@() delete(tmp));
+    A = sparse(64, 3);
+    save(tmp, 'A');
+    [~, f] = fileparts(tmp);
+    try
+        prepare_session_files({tmp});
+        verifyFail(testCase, 'no error');
+    catch ME
+        verifyEqual(testCase, ME.identifier, 'BatchCellReg:BadInput');
+        verifySubstring(testCase, ME.message, f);
+        verifySubstring(testCase, ME.message, '64x3');
+    end
+end
+
 function test_takes_first_field_like_load_single_session(testCase)
     tmp = [tempname '.mat'];
     cleanup = onCleanup(@() delete(tmp));

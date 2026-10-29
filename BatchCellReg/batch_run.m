@@ -4,17 +4,18 @@ function summary = batch_run(input_folder, cfg, opts)
 %   input_folder: path scanned for session files.
 %   cfg:         full batch config struct.
 %   opts (struct, all optional):
-%     .live_log_callback   function handle (msg) for GUI
+%     .live_log_callback   function handle (msg) for each log line. Absent:
+%                          print the lines to the command window. []: silent.
 %     .stop_check          function handle returning logical (set true to stop)
 %     .selected_datasets   cell array of dataset_ids to run. Absent: all
 %                          non-skipped datasets. Present but empty: none.
 %
-%   Returns summary struct: results, anomalies, output_dir, log_file, results_csv,
-%   detail_csv, match_stats_csv, warnings_png, n_succeeded, n_failed,
-%   n_with_warnings, stopped.
+%   Returns summary struct: results, anomalies, session_names (the cell map
+%   columns), output_dir, log_file, results_csv, detail_csv, match_stats_csv,
+%   warnings_png, n_succeeded, n_failed, n_with_warnings, stopped.
 
     if nargin < 3; opts = struct(); end
-    if ~isfield(opts, 'live_log_callback'); opts.live_log_callback = []; end
+    if ~isfield(opts, 'live_log_callback'); opts.live_log_callback = @(msg) fprintf('%s\n', msg); end
     if ~isfield(opts, 'stop_check'); opts.stop_check = @() false; end
     has_selection = isfield(opts, 'selected_datasets');
 
@@ -30,6 +31,22 @@ function summary = batch_run(input_folder, cfg, opts)
     logger.info('GLOBAL', 'input=%s, output=%s, datasets=%d, unparsed=%d', ...
         input_folder, output_dir, numel(scan.datasets), numel(scan.unparsed));
     expected = cfg.cellreg.expected_n_sessions;
+    logger.info('GLOBAL', ['microns_per_pixel=%g, maximal_distance_um=%g, ' ...
+        'expected_n_sessions=%d, model=%s, fpr_max=%g'], cfg.cellreg.microns_per_pixel, ...
+        cfg.cellreg.maximal_distance_um, expected, cfg.cellreg.initial_registration_type, ...
+        cfg.p_same_tuning.fpr_max);
+    if ~isempty(scan.unparsed)
+        shown = scan.unparsed(1:min(20, end));
+        logger.warn('GLOBAL', ['%d files do not match <EXPERIMENT>_<ANIMAL>_<SESSION>*.mat ' ...
+            '(ANIMAL = 1-2 letters + 2 digits, SESSION = digit + D or T) and are ignored: %s%s'], ...
+            numel(scan.unparsed), strjoin(shown, ', '), ...
+            repmat(' ...', 1, numel(scan.unparsed) > numel(shown)));
+    end
+    if isempty(scan.datasets)
+        logger.warn('GLOBAL', 'no dataset found: rename the files (manual, section 1.2)');
+        warning('BatchCellReg:NoDatasets', ['No dataset found in %s: %d .mat files do ' ...
+            'not match the naming rule (manual, section 1.2).'], input_folder, numel(scan.unparsed));
+    end
     logger.info('GLOBAL', 'cell map columns (sessions of the batch): %s', ...
         strjoin(scan.session_names, ', '));
     if numel(scan.session_names) ~= expected
@@ -71,9 +88,10 @@ function summary = batch_run(input_folder, cfg, opts)
         catch ME
             r = struct();
             r.dataset_id = d.dataset_id;
+            r.sessions = {d.sessions.session_id};
             r.error = ME.message;
             logger.error(d.dataset_id, 'FAILED: %s', ME.message);
-            logger.error(d.dataset_id, 'Stack: %s', getReport(ME, 'basic'));
+            logger.error(d.dataset_id, 'Stack: %s', getReport(ME, 'extended', 'hyperlinks', 'off'));
         end
         results = [results, normalize_result(r)]; %#ok<AGROW>
     end
@@ -109,6 +127,7 @@ function summary = batch_run(input_folder, cfg, opts)
     summary = struct( ...
         'results', results, ...
         'anomalies', anomalies, ...
+        'session_names', {scan.session_names}, ...
         'output_dir', output_dir, ...
         'log_file', log_file, ...
         'results_csv', results_csv, ...
@@ -170,7 +189,7 @@ function [results_csv, detail_csv] = export_results(results, anomalies, output_d
         end
         sev = cellfun(@(nm) f.(nm), names, 'UniformOutput', false);
         rows(end+1, :) = [{r.dataset_id, numel(r.sessions), strjoin(r.missing_sessions, ' '), ...
-            n_cells, pct, pct_mean, r.chosen_p_same, 100 * r.chosen_fpr, ...
+            n_cells, pct, pct_mean, round(100 * r.chosen_p_same) / 100, 100 * r.chosen_fpr, ...
             r.best_model_string, r.alignment_mode}, sev, ...
             {m.median_cells, m.worst_session_ratio, m.min_xcorr, m.max_shift_px, ...
             m.model_mse, m.worst_link_ratio, r.error}]; %#ok<AGROW>

@@ -99,6 +99,41 @@ function test_folder_without_valid_names_warns(testCase)
     verifyMatches(testCase, fileread(summary.log_file), 'mouse3_day1\.mat');
 end
 
+function test_tables_keep_datasets_of_earlier_runs(testCase)
+    % A run of some datasets must not drop the others from the tables. A
+    % dataset whose folder was deleted is left out.
+    repo_root = fullfile(fileparts(mfilename('fullpath')), '..', '..');
+    addpath(genpath(fullfile(repo_root, 'BatchCellReg')));
+    in = fullfile(tempdir, ['BatchCellReg_keep_' datestr(now,'HHMMSSFFF')]);
+    out = fullfile(in, 'Matching');
+    mkdir(fullfile(out, 'OLD_M01'));
+    cleanup = onCleanup(@() rmdir(in, 's'));
+    for k = 1:2
+        copyfile(fullfile(repo_root, 'SampleData', sprintf('spatial_footprints_%02d.mat', k)), ...
+                 fullfile(in, sprintf('NEW_M01_%dD.mat', k)));
+    end
+    old = @(id) struct('dataset_id', id, 'sessions', {{'1D', '2D'}}, ...
+        'n_cells_per_session', [100 110], 'match_stats', [150 60 90], 'error', '');
+    results = [old('OLD_M01'), old('GONE_M02')];   %#ok<NASGU>
+    origin = struct('dataset_id', {'OLD_M01', 'GONE_M02'}, 'settings', {'other', 'other'}); %#ok<NASGU>
+    save(fullfile(out, '_batch_results.mat'), 'results', 'origin');
+
+    cfg = batch_default_config();
+    cfg.cellreg.use_parallel_processing = false;
+    summary = batch_run(in, cfg, struct('selected_datasets', {{}}, 'live_log_callback', []));
+    verifyEqual(testCase, summary.n_succeeded + summary.n_failed, 0);
+    verifyEqual(testCase, summary.n_kept, 1);
+    verifyEqual(testCase, {summary.results.dataset_id}, {'OLD_M01'});
+    p = parse_batch_results_csv(summary.results_csv);
+    verifyEqual(testCase, p.rows(:, 1)', {'OLD_M01'});
+    log = fileread(summary.log_file);
+    verifyMatches(testCase, log, '1 datasets from earlier runs: OLD_M01');
+    verifyMatches(testCase, log, 'registered with other settings: OLD_M01');
+    s = load(fullfile(out, '_batch_results.mat'));
+    verifyEqual(testCase, {s.results.dataset_id}, {'OLD_M01'});
+    verifyEqual(testCase, strtrim(fileread(fullfile(out, '_cellmap_columns.txt'))), sprintf('1D\n2D'));
+end
+
 function test_model_can_be_set_in_config(testCase)
     repo_root = fullfile(fileparts(mfilename('fullpath')), '..', '..');
     addpath(genpath(fullfile(repo_root, 'CellReg')));

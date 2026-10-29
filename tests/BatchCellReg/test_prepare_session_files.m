@@ -42,7 +42,7 @@ function test_pixels_by_cells_matrix_is_refused_with_file_name(testCase)
     catch ME
         verifyEqual(testCase, ME.identifier, 'BatchCellReg:BadInput');
         verifySubstring(testCase, ME.message, f);
-        verifySubstring(testCase, ME.message, '64x3');
+        verifySubstring(testCase, ME.message, '64x3 sparse double');
     end
 end
 

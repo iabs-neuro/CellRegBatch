@@ -433,6 +433,10 @@ function on_run(fig)
     summary = batch_run(folder, app.config, opts);
     app.ui.progress_label.Text = sprintf('done: %d ok, %d failed, %d with warnings', ...
         summary.n_succeeded, summary.n_failed, summary.n_with_warnings);
+    if summary.n_kept > 0
+        app.ui.progress_label.Text = sprintf('%s; table also shows %d from earlier runs', ...
+            app.ui.progress_label.Text, summary.n_kept);
+    end
 
     app = getappdata(fig, 'app');
     app.last_summary = summary;

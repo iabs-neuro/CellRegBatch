@@ -12,7 +12,12 @@ function summary = batch_run(input_folder, cfg, opts)
 %
 %   Returns summary struct: results, anomalies, session_names (the cell map
 %   columns), output_dir, log_file, results_csv, detail_csv, match_stats_csv,
-%   warnings_png, n_succeeded, n_failed, n_with_warnings, stopped.
+%   warnings_png, n_succeeded, n_failed, n_with_warnings, n_kept, stopped.
+%
+%   The tables, the figure and summary.results cover the whole output folder:
+%   datasets of earlier runs (stored in _batch_results.mat) stay in them while
+%   their folder exists. n_succeeded, n_failed and n_with_warnings count this
+%   run only; n_kept counts the datasets taken from earlier runs.
 
     if nargin < 3; opts = struct(); end
     if ~isfield(opts, 'live_log_callback'); opts.live_log_callback = @(msg) fprintf('%s\n', msg); end
@@ -46,10 +51,12 @@ function summary = batch_run(input_folder, cfg, opts)
         logger.warn('GLOBAL', 'no dataset found: rename the files (manual, section 1.2)');
         warning('BatchCellReg:NoDatasets', ['No dataset found in %s: %d .mat files do ' ...
             'not match the naming rule (manual, section 1.2).'], input_folder, numel(scan.unparsed));
+    else
+        logger.info('GLOBAL', 'cell map columns (sessions of the batch): %s', ...
+            strjoin(scan.session_names, ', '));
+        write_lines(scan.session_names, fullfile(output_dir, '_cellmap_columns.txt'));
     end
-    logger.info('GLOBAL', 'cell map columns (sessions of the batch): %s', ...
-        strjoin(scan.session_names, ', '));
-    if numel(scan.session_names) ~= expected
+    if ~isempty(scan.datasets) && numel(scan.session_names) ~= expected
         logger.warn('GLOBAL', ['the batch has %d session names, expected %d: ' ...
             'check the file names'], numel(scan.session_names), expected);
     end
@@ -96,6 +103,18 @@ function summary = batch_run(input_folder, cfg, opts)
         results = [results, normalize_result(r)]; %#ok<AGROW>
     end
 
+    run_ids = {};
+    if ~isempty(results); run_ids = {results.dataset_id}; end
+    store = fullfile(output_dir, '_batch_results.mat');
+    [results, origin, kept] = merge_previous_results(results, store, output_dir, ...
+        registration_settings(cfg), logger);
+    try
+        save(store, 'results', 'origin');
+    catch ME
+        logger.warn('GLOBAL', 'cannot write %s (%s): the next run will not keep this one', ...
+            store, ME.message);
+    end
+
     at = cfg.anomaly_thresholds;
     at.expected_n_sessions = expected;
     at.fpr_max = cfg.p_same_tuning.fpr_max;
@@ -114,9 +133,11 @@ function summary = batch_run(input_folder, cfg, opts)
         warnings_png = '';
     end
 
-    n_succeeded = sum(arrayfun(@(r) isempty(r.error), results));
-    n_failed    = numel(results) - n_succeeded;
-    n_warned    = count_with_warnings(anomalies);
+    in_run = false(1, numel(results));
+    if ~isempty(results); in_run = ismember({results.dataset_id}, run_ids); end
+    n_succeeded = sum(arrayfun(@(r) isempty(r.error), results(in_run)));
+    n_failed    = sum(in_run) - n_succeeded;
+    n_warned    = count_with_warnings(anomalies, in_run);
     logger.info('GLOBAL', 'summary: %d succeeded, %d failed, %d with warnings', ...
         n_succeeded, n_failed, n_warned);
 
@@ -137,11 +158,15 @@ function summary = batch_run(input_folder, cfg, opts)
         'n_succeeded', n_succeeded, ...
         'n_failed', n_failed, ...
         'n_with_warnings', n_warned, ...
+        'n_kept', numel(kept), ...
         'stopped', stopped);
 end
 
 function r = normalize_result(r)
-    defaults = struct( ...
+%NORMALIZE_RESULT The same fields, in the same order, for every result, so
+%   results of failed datasets and of earlier runs (maybe from an older
+%   version) concatenate. Unknown fields are dropped.
+    defaults = struct('dataset_id', '', 'error', '', ...
         'sessions', {{}}, 'n_cells_per_session', [], 'match_stats', [0 0], ...
         'maximal_cross_correlation', [], 'alignment_translations', [], ...
         'alignment_shift_px', [], 'reference_session_index', 1, ...
@@ -149,22 +174,79 @@ function r = normalize_result(r)
         'chosen_fpr', NaN, 'p_same_unreachable', false, ...
         'alignment_mode', '', 'forced_low_xcorr', false, 'missing_sessions', {{}}, ...
         'linked_fraction', []);
-    fns = fieldnames(defaults);
+    out = defaults;
+    fns = fieldnames(r);
     for k = 1:numel(fns)
-        if ~isfield(r, fns{k})
-            r.(fns{k}) = defaults.(fns{k});
-        end
+        if isfield(out, fns{k}); out.(fns{k}) = r.(fns{k}); end
     end
-    if ~isfield(r, 'error'); r.error = ''; end
+    r = orderfields(out);
 end
 
-function n = count_with_warnings(a)
+function s = registration_settings(cfg)
+%REGISTRATION_SETTINGS The settings that change a registration, as text.
+    c = rmfield(cfg.cellreg, {'figures_visibility', 'use_parallel_processing', ...
+        'write_to_file', 'expected_n_sessions'});
+    s = jsonencode(struct('cellreg', c, 'p_same_tuning', cfg.p_same_tuning));
+end
+
+function [results, origin, kept] = merge_previous_results(results, store, output_dir, settings, logger)
+%MERGE_PREVIOUS_RESULTS Add the datasets of earlier runs that this run did
+%   not process, so that a run of one dataset does not drop the others from
+%   the tables. A dataset whose folder was deleted is left out.
+    origin = struct('dataset_id', {}, 'settings', {});
+    for r = results
+        origin(end+1) = struct('dataset_id', r.dataset_id, 'settings', settings); %#ok<AGROW>
+    end
+    kept = {};
+    if exist(store, 'file') ~= 2; return; end
+    try
+        prev = load(store);
+    catch ME
+        logger.warn('GLOBAL', 'cannot read %s (%s): the tables cover this run only', store, ME.message);
+        return
+    end
+    if ~isfield(prev, 'results') || ~isfield(prev, 'origin'); return; end
+    done = {origin.dataset_id};
+    other = {};
+    for k = 1:numel(prev.results)
+        p = prev.results(k);
+        if ismember(p.dataset_id, done) || ~exist(fullfile(output_dir, p.dataset_id), 'dir')
+            continue
+        end
+        o = prev.origin(strcmp({prev.origin.dataset_id}, p.dataset_id));
+        s = '';
+        if ~isempty(o); s = o(1).settings; end
+        results = [results, normalize_result(p)]; %#ok<AGROW>
+        origin(end+1) = struct('dataset_id', p.dataset_id, 'settings', s); %#ok<AGROW>
+        kept{end+1} = p.dataset_id; %#ok<AGROW>
+        if ~strcmp(s, settings); other{end+1} = p.dataset_id; end %#ok<AGROW>
+    end
+    if isempty(kept); return; end
+    [~, order] = sort({results.dataset_id});
+    results = results(order);
+    origin = origin(order);
+    logger.info('GLOBAL', 'the tables also include %d datasets from earlier runs: %s', ...
+        numel(kept), strjoin(kept, ', '));
+    if ~isempty(other)
+        logger.warn('GLOBAL', ['%d of them were registered with other settings: %s ' ...
+            '(see their logFile_*.txt)'], numel(other), strjoin(other, ', '));
+    end
+end
+
+function n = count_with_warnings(a, in_run)
     n = 0;
-    for k = 1:numel(a.flags)
+    for k = find(in_run)
         if any(structfun(@(x) x, a.flags(k)))
             n = n + 1;
         end
     end
+end
+
+function write_lines(lines, path)
+    fid = fopen(path, 'w');
+    if fid < 0; return; end
+    fprintf(fid, '%s\n', lines{:});
+    fclose(fid);
 end
 
 function [results_csv, detail_csv] = export_results(results, anomalies, output_dir)

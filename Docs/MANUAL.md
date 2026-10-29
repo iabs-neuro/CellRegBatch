@@ -97,6 +97,22 @@ The scan marks a dataset as skipped when:
 A skipped dataset appears in the GUI table with **Run** cleared. The batch log
 records the reason.
 
+### 1.5 Missing sessions
+
+Set `expected_n_sessions` to the number of sessions of your experiment. A
+dataset with another number of sessions is **not** skipped. The batch matches
+the sessions that it has and gives it a red `session_count` warning.
+
+The session names of the batch are all session names found in the folder
+(datasets that are skipped do not count). They set the columns of every cell
+map (5.6). For example, the batch has `1D`–`5D` and mouse `F07` has no `3D`.
+The cell map of `F07` then has 5 columns, and column 3 is all zeros. All cell
+maps of the batch have the same columns.
+
+The batch writes the session names to the log (`cell map columns`). If their
+number is not `expected_n_sessions`, the log has a `WARN` line: check the file
+names.
+
 ---
 
 ## 2. Running the batch
@@ -120,8 +136,11 @@ path for the current session. It does not save the path.
 |---|---|
 | Input folder, **Browse...** | Select the folder with the session files. The output folder is shown below it. |
 | **Scan** | Read the folder and fill the table. |
-| Table | One row per dataset: **Run** (check box), dataset name, number of sessions, session list in session order. |
+| **Expected sessions per mouse** | Number of sessions of your experiment (`expected_n_sessions`, 1.5). The value goes into the config. |
+| Session line | The session names of the folder and how many datasets do not have the expected number. Red text: some datasets differ. |
+| Table | One row per dataset: **Run** (check box), dataset name, number of sessions, session list in session order, **Check**. **Check** is `OK` or says what is wrong, for example `4 of 5: no 3D`. A red **Check** cell: the dataset will run and get a red `session_count` warning. |
 | Unparsed files | Number of `.mat` files with names that do not match the rule in 1.2. |
+| **?** | Explains the field next to it. Each tab has these buttons. |
 
 Clear **Run** for the datasets that you do not want to process. If you clear
 **Run** for all datasets, **Run batch** shows a message and does not start. If
@@ -131,16 +150,18 @@ you do not click **Scan**, **Run batch** processes all datasets.
 
 ![Parameters tab](images/gui_parameters.png)
 
-The tab shows the most-used parameters. Section 3 describes all of them.
+The left column has the CellReg parameters. The right column has the warning
+limits: one row per rule, with the yellow limit and the red limit. Section 3
+describes all parameters. Section 6 describes the warnings.
 
 | Button | Action |
 |---|---|
-| **Load config...** | Load a JSON config file. All values change, also the values that are not shown in the GUI. |
+| **Load config...** | Load a JSON config file. All values change, also the values that are not shown in the GUI. A file from an older version also loads (3.1). |
 | **Save config as...** | Save the current config to a JSON file. |
 | **Reset to defaults** | Set all values to the defaults in `batch_default_config.m`. |
 
-**Registration approach** and **Initial registration** are disabled. Section
-4.4 explains why.
+**Registration approach** is disabled: the batch always uses the probabilistic
+approach (4.4).
 
 **Run & Results tab**
 
@@ -150,13 +171,14 @@ The tab shows the most-used parameters. Section 3 describes all of them.
 |---|---|
 | **Run batch** | Run all datasets that have **Run** set. MATLAB is busy until the batch ends. |
 | **Stop** | Stop the batch before the next dataset starts. The current dataset finishes first. |
-| **Load results CSV...** | Show a saved `_batch_results.csv` in the table. Use it to look at an earlier batch again. |
+| **Load results CSV...** | Show a saved `_batch_results.csv` in the table. Use it to look at an earlier batch again. The GUI also reads `_batch_warnings_detail.csv` and finds `_batch_warnings.png` in the same folder. |
 | Log area | The batch log, live. It keeps the last 500 lines. The full log is in the output folder. |
-| Results table | One row per processed dataset. Columns: dataset, number of sessions, number of registered cells, fraction of registered cells found in all sessions (column **%match**, a fraction from 0 to 1), chosen FPR, then the 12 warning columns. Red cell = severity 2, yellow cell = severity 1. |
-| Decode line | Click a warning cell. The line below the table explains the warning. |
+| Results table | One row per processed dataset: name, number of sessions, number of registered cells, **Match %** (cells in all sessions ÷ mean cells per session, in percent), **FPR %**, then the six warnings (section 6). Red cell = red warning, yellow cell = yellow warning. A grey row is a dataset that failed. |
+| Decode area | Click a cell of the table. The area shows the warning, each rule that fired, the value and the limit. For a failed dataset it shows the error. |
 | **Export results CSV** | Save a copy of `_batch_results.csv`. |
 | **Export log TXT** | Save a copy of the batch log. It works after a run, not after **Load results CSV**. |
 | **Open output folder** | Open the output folder in the file explorer. |
+| **Warnings figure** | Open `_batch_warnings.png` (5.4). |
 
 ### 2.2 Script
 
@@ -186,9 +208,9 @@ does not read `cfg.io.input_folder`.
 | `summary` field | Meaning |
 |---|---|
 | `results` | Struct array, one element per processed dataset (see 4.8). |
-| `anomalies` | `.flags` (warning severities) and `.metrics` per dataset; `.details`, one element per fired warning (the rows of 5.2). |
-| `output_dir`, `log_file`, `results_csv`, `detail_csv`, `match_stats_csv` | Paths of the output folder and files. |
-| `n_succeeded`, `n_failed`, `n_with_warnings` | Counts. A dataset counts as "with warnings" if any warning is 1 or 2. |
+| `anomalies` | `.flags` (six warnings per dataset: 0 = none, 1 = yellow, 2 = red), `.metrics` (the values behind them), `.details` (one element per fired rule, the rows of 5.2), `.batch` (median and limits of the match comparison). |
+| `output_dir`, `log_file`, `results_csv`, `detail_csv`, `match_stats_csv`, `warnings_png` | Paths of the output folder and files. `warnings_png` is empty if the figure failed. |
+| `n_succeeded`, `n_failed`, `n_with_warnings` | Counts. A dataset counts as "with warnings" if any warning is yellow or red. |
 | `stopped` | `true` if the batch stopped early. |
 
 ---
@@ -213,22 +235,25 @@ To change a parameter that the GUI does not show:
 | `cellreg.reference_session_index` | yes | 1 | Number of the reference session in session order (1.3). |
 | `cellreg.maximal_distance_um` | yes | 15 | CellReg "maximal distance": cell pairs with centroids farther apart are not compared. CellReg's `demo.m` uses 14. In our data a large value (50) made the spatial-correlation model fail on dense fields of view. |
 | `cellreg.registration_approach` | disabled | `Probabilistic` | Not used. The batch always uses the probabilistic approach (4.4). |
-| `cellreg.initial_registration_type` | disabled | `auto` | Not used. CellReg chooses the model (4.4). |
+| `cellreg.initial_registration_type` | yes (**Registration model**) | `auto` | `auto`: CellReg chooses the model with the better fit. `Spatial correlation` or `Centroid distance`: use this model for every dataset (4.4). |
 | `cellreg.use_parallel_processing` | yes | `true` | Use `parfor` in CellReg alignment. Needs the Parallel Computing Toolbox. Turn it off if you do not have the toolbox. |
 | `cellreg.figures_visibility` | yes | `off` | `on` shows each CellReg figure while the batch runs. The figures are saved in both cases. |
-| `cellreg.write_to_file` | yes | `true` | Write `cellRegistered_*.mat` and `logFile_*.txt` for each dataset. Figures and the batch tables are written in both cases. |
-| `cellreg.alignment_min_xcorr` | JSON | 0.2 | Pass criterion for an alignment mode (4.3). |
-| `cellreg.expected_n_sessions` | JSON | 5 | Number of sessions you expect per dataset. Used by warning W7. **Set it for your study.** |
+| `cellreg.write_to_file` | yes | `true` | Write `cellRegistered_*.mat`, `logFile_*.txt` and the cell map for each dataset. Figures and the batch tables are written in both cases. |
+| `cellreg.alignment_min_xcorr` | yes (**Alignment gate**) | 0.2 | Pass criterion for an alignment mode (4.3). |
+| `cellreg.expected_n_sessions` | Setup tab | 5 | Number of sessions you expect per dataset (1.5). **Set it for your study.** |
 | `cellreg.rotation_fallback_deg` | JSON | 90 | Rotation range in degrees for the third cascade mode. |
 | `cellreg.nonrigid_smoothness` | JSON | 2 | Smoothness value for the non-rigid mode. CellReg passes it to `imregdemons` as `AccumulatedFieldSmoothing`. |
 | `p_same_tuning.fpr_max` | yes | 0.03 | Target false-positive rate for the P_same threshold (4.5). |
-| `anomaly_thresholds.z_threshold` | yes | 2.0 | z-score limit for the warnings that use z-scores (section 6). |
-| `anomaly_thresholds.max_translation_px` | yes | 30 | Shift limit for W5a, in pixels. |
-| `anomaly_thresholds.min_xcorr` | yes | 0.3 | Cross-correlation limit for W3a. |
-| `anomaly_thresholds.max_mse` | yes | 0.1 | Model-error limit for W6a. |
+| `anomaly_thresholds.few_cells_yellow`, `few_cells_red` | yes | 60, 30 | `few_cells`: median cells per session below the limit. |
+| `anomaly_thresholds.cell_drop_yellow`, `cell_drop_red` | yes | 0.6, 0.4 | `cell_drop`: cells of the worst session ÷ median session below the limit. |
+| `anomaly_thresholds.xcorr_yellow`, `xcorr_red` | yes | 0.3, 0.25 | `alignment`: lowest cross-correlation below the limit. |
+| `anomaly_thresholds.shift_yellow_px` | yes | 30 | `alignment`: largest shift above the limit, in pixels. Yellow only. |
+| `anomaly_thresholds.mse_yellow`, `mse_red` | yes | 0.1, 0.15 | `model_fit`: model error (MSE) above the limit. |
+| `anomaly_thresholds.match_z_yellow`, `match_z_red` | yes | 2, 3 | `low_match`: match % more than this many robust standard deviations below the batch median. |
+| `anomaly_thresholds.session_link_yellow`, `session_link_red` | yes | 0.6, 0.4 | `low_match`: session link ratio (section 6) below the limit. |
 | `io.input_folder` | yes | empty | The folder selected in the GUI. `batch_run` does not read it. |
 | `io.output_subfolder_name` | JSON | `Matching` | Output folder, relative to the input folder. A path such as `..\6_Matched` is allowed. |
-| `version` | – | 1 | Config format version. `config_from_json` refuses other values. |
+| `version` | – | 2 | Config format version. `config_from_json` reads versions 1 and 2 and refuses other values. |
 
 Some values are fixed in the code:
 
@@ -236,7 +261,22 @@ Some values are fixed in the code:
 |---|---|---|
 | `sufficient_correlation_footprints` = 0.2 and `sufficient_correlation_centroids` = 0.2 | `run_single_dataset.m` | The same values as the CellReg GUI (`GUI/CellReg.m`). CellReg's `demo.m` uses 0.3 for footprints. With 0.3, CellReg rejected rigid alignment for sessions that the CellReg GUI aligns. |
 | P_same certainty level = 0.95 | `run_single_dataset.m` | Used by CellReg to estimate the fraction of uncertain cell pairs, as in `demo.m`. |
-| W2b_hard ratio limit = 3 | `detect_anomalies.m` | See W2b_hard in section 6. |
+| Smallest batch for the match comparison = 5 datasets | `detect_anomalies.m` | A median and a MAD of fewer values are not stable. |
+
+### 3.1 Config files from an older version
+
+`config_from_json` starts from the defaults and takes every value that the
+file has. So a file without the new fields still loads. Version 1 files used
+other names for three warning limits. They load under the new names:
+
+| Version 1 name | New name |
+|---|---|
+| `min_xcorr` | `xcorr_yellow` |
+| `max_mse` | `mse_yellow` |
+| `max_translation_px` | `shift_yellow_px` |
+
+`z_threshold` has no new name and is ignored. A field that this version does
+not know gives a MATLAB warning and is ignored.
 
 ---
 
@@ -281,8 +321,8 @@ If no mode passes, two cases are possible:
 
 - At least one mode left no session empty. The batch uses the mode with the
   highest minimal cross-correlation and continues. The log and the result mark
-  this mode as `(forced, low xcorr=...)`. Warning W3a is then always red,
-  because the cross-correlation is below 0.2 and W3a fires below 0.3.
+  this mode as `(forced, low xcorr=...)`. The `alignment` warning is then
+  red.
 - Every mode left a session empty. The dataset fails with the error
   `All alignment modes failed ...`.
 
@@ -293,12 +333,16 @@ correlations of neighboring cell pairs. It fits a model of same-cell and
 different-cell pairs to each distribution and estimates the registration
 accuracy.
 
-CellReg's `choose_best_model` then chooses the centroid-distance model or the
-spatial-correlation model. It takes the model with the lower sum of false
-positives, false negatives and model error (MSE). The batch always uses the
-chosen model and always uses the probabilistic approach. For this reason
-**Registration approach** and **Initial registration** are disabled in the
-GUI. See also the note on `choose_best_model` in section 9.
+With **Registration model** = `auto`, CellReg's `choose_best_model` chooses
+the centroid-distance model or the spatial-correlation model. It takes the
+model with the lower sum of false positives, false negatives and model error
+(MSE). See also the note on `choose_best_model` in section 9. With
+`Spatial correlation` or `Centroid distance`, the batch uses that model for
+every dataset. The log then has the line `model ... set in config (best fit:
+...)`.
+
+The batch always uses the probabilistic approach, so **Registration approach**
+is disabled in the GUI.
 
 ### 4.5 Choose the P_same threshold (batch layer)
 
@@ -310,14 +354,15 @@ default threshold is 0.5. The batch chooses the threshold with this rule:
 2. If FPR ≤ `fpr_max` (0.03), use 0.5.
 3. If not, increase the threshold in steps of 0.001, up to 0.95. Use the
    first threshold with FPR ≤ `fpr_max`.
-4. If no threshold up to 0.95 gives FPR ≤ `fpr_max`, use 0.95 and set
-   warning W4.
+4. If no threshold up to 0.95 gives FPR ≤ `fpr_max`, use 0.95. The
+   `model_fit` warning is then red.
 
 The FPR is the value that CellReg writes to `logFile_*.txt` as "Fraction of
 false positives". The batch computes it the same way as
 `CellReg/save_log_file.m`: the cumulative false-positive fraction of the
 chosen model, at the threshold rounded to 2 decimals. The batch stores the
-value without the final rounding to 0.01 (column `chosen_fpr`).
+value without the final rounding to 0.01 (column `chosen_fpr_pct`, in
+percent).
 
 The code is in `BatchCellReg/choose_p_same_by_fpr.m`.
 
@@ -339,10 +384,11 @@ scores.
 When `write_to_file` is on, the batch first deletes old `cellRegistered_*.mat`
 and `logFile_*.txt` files in the dataset folder. Then it writes new ones. Each
 dataset folder holds one result. The batch also writes the cell map of the
-dataset as `<dataset>_cellmap.csv` in the output folder (5.5).
+dataset as `<dataset>_cellmap.csv` in the output folder (5.6). The cell map
+has one column for each session name of the batch (1.5).
 
 The result that the batch keeps for the warnings has these fields:
-`dataset_id`, `sessions`, `n_cells_per_session`, `match_stats`,
+`dataset_id`, `sessions`, `missing_sessions`, `n_cells_per_session`, `match_stats`,
 `maximal_cross_correlation`, `alignment_translations`, `alignment_shift_px`,
 `reference_session_index`, `MSE_model`, `best_model_string`, `chosen_p_same`,
 `chosen_fpr`, `p_same_unreachable`, `alignment_mode`, `forced_low_xcorr`,
@@ -363,8 +409,9 @@ hidden figures fill the memory during a long batch.
     ├── _batch_config.json                     config of the last run
     ├── _batch_log_YYYYMMDD_HHMMSS.txt         one log per run
     ├── _batch_results.csv                     one row per processed dataset
-    ├── _batch_warnings_detail.csv             one row per fired warning
+    ├── _batch_warnings_detail.csv             one row per fired warning rule
     ├── _match_statistics.csv                  cells found in k sessions, per dataset
+    ├── _batch_warnings.png                    picture of all warnings
     ├── <dataset>_cellmap.csv                  cell map of each dataset
     └── <dataset>/                             for example CC_H02/
         ├── cellRegistered_YYYYMMDD_HHMMSS.mat
@@ -373,8 +420,10 @@ hidden figures fill the memory during a long batch.
 ```
 
 Each run overwrites `_batch_config.json`, `_batch_results.csv`,
-`_batch_warnings_detail.csv` and `_match_statistics.csv`. If a CSV file is open in another program (for
-example Excel), the batch tries again 3 times. Then it writes a copy with a
+`_batch_warnings_detail.csv`, `_match_statistics.csv` and
+`_batch_warnings.png`. The CSV files round numbers to 3 decimals. If a CSV
+file is open in another program (for example Excel), the batch tries again 3
+times. Then it writes a copy with a
 time stamp in the name and gives a MATLAB warning.
 
 ### 5.1 `_batch_results.csv`
@@ -382,15 +431,22 @@ time stamp in the name and gives a MATLAB warning.
 | Column | Meaning |
 |---|---|
 | `dataset_id` | Dataset name. |
-| `n_sessions` | Number of sessions. |
+| `n_sessions` | Number of sessions of the dataset. |
+| `missing_sessions` | Session names of the batch that the dataset does not have (1.5). Empty if none. |
 | `n_cells` | Number of registered cells: rows of `cell_to_index_map`. A cell found in any session counts once. |
-| `pct_in_all` | Registered cells found in all sessions ÷ `n_cells`. **A fraction from 0 to 1**, not percent. See 7.2 for another definition. |
-| `chosen_fpr` | FPR at the chosen P_same threshold (4.5). |
-| `W1` … `W7` | Warning severity: 0 = none, 1 = yellow, 2 = red. See section 6. |
-| `W3a_min_xcorr` | Lowest cross-correlation, when W3a fired. Else `NaN`. |
-| `W5a_max_shift_px` | Largest shift in pixels, when W5a fired. Else `NaN`. |
-| `W6a_mse` | Model error (MSE) of the chosen model. |
-| `W2b_ratio` | Largest ÷ smallest number of cells per session. |
+| `pct_in_all` | Registered cells found in all sessions ÷ `n_cells`, in percent. |
+| `pct_in_all_of_mean` | Registered cells found in all sessions ÷ mean cells per session, in percent. This is **Match %** in the GUI. See 7.2. |
+| `chosen_p_same` | The P_same threshold (4.5). |
+| `chosen_fpr_pct` | FPR at that threshold, in percent. |
+| `model` | The model used: `Spatial correlation` or `Centroid distance`. |
+| `alignment_mode` | The alignment mode that passed (4.3). |
+| `session_count` … `low_match` | The six warnings: 0 = none, 1 = yellow, 2 = red. See section 6. |
+| `median_cells` | Median number of cells per session. |
+| `worst_session_ratio` | Cells of the worst session ÷ median cells per session. |
+| `min_xcorr` | Lowest cross-correlation of a session with the reference. |
+| `max_shift_px` | Largest shift of a session, in pixels. |
+| `model_mse` | Model error (MSE) of the model used. |
+| `worst_link_ratio` | Session link ratio (section 6). Empty for datasets with fewer than 3 sessions. |
 | `error` | Error message if the dataset failed. Commas are replaced by `;`. |
 
 A failed dataset has a message in `error`, `n_cells` = 0 and all warning
@@ -399,29 +455,18 @@ does not compute warnings for failed datasets.
 
 ### 5.2 `_batch_warnings_detail.csv`
 
-One row for each warning with severity 1 or 2.
+One row for each rule that fired. One warning can have more than one row, for
+example `alignment` with a low cross-correlation and a large shift.
 
 | Column | Meaning |
 |---|---|
 | `dataset_id` | Dataset name. |
-| `session` | The session that caused the warning, for the checks of single sessions (W2, W3a, W3b, W5a, W5b). `-` for the checks of the whole dataset. |
-| `anomaly_type` | Code and short name, for example `W3a_low_xcorr_hard`. |
-| `value` | The value that the check tested (see the table below). |
-| `threshold` | The limit that `value` crossed, in the same units. For a red "batch" or "within" check: mean ± `z_threshold` × SD. For a yellow "batch" check: the first or the third quartile. |
-| `severity` | 1 = yellow, 2 = red. |
-
-| `anomaly_type` | `value` |
-|---|---|
-| `W1_pct_match_outlier` | `pct_in_all` of the dataset |
-| `W2_cells_outlier` | Number of cells in the session with the largest \|z\| |
-| `W2b_hard_ratio`, `W2b_rel` | Largest ÷ smallest number of cells per session |
-| `W3a_low_xcorr_hard` | Lowest cross-correlation with the reference session |
-| `W3b_xcorr_outlier` | Cross-correlation of the session with the largest \|z\| |
-| `W4_fpr_unreachable` | FPR at P_same = 0.95. The limit is `fpr_max`. |
-| `W5a_shift_hard` | Largest shift of a non-reference session, in pixels |
-| `W5b_shift_outlier` | Shift of the session with the largest \|z\|, in pixels |
-| `W6a_mse_hard`, `W6b_mse_rel` | MSE of the chosen model |
-| `W7_session_count` | Number of sessions. The limit is `expected_n_sessions`. |
+| `session` | The session that caused the warning. For `session_count`: the missing sessions. `-` for the rules about the whole dataset. |
+| `warning` | Warning name (section 6). |
+| `rule` | The rule that fired, in words, for example `cells in worst session / median session`. |
+| `value` | The value that the rule tested. |
+| `threshold` | The limit that `value` crossed, in the same units. |
+| `severity` | `yellow` or `red`. |
 
 ### 5.3 `_match_statistics.csv`
 
@@ -431,29 +476,52 @@ by the number of sessions they were found in.
 | Column | Meaning |
 |---|---|
 | `dataset_id`, `n_sessions` | Dataset name and number of sessions. |
+| `missing_sessions` | As in `_batch_results.csv`. |
 | `n_cells` | Number of registered cells, as in `_batch_results.csv`. |
-| `in_S_sessions` … `in_1_sessions` | Number of registered cells found in exactly k sessions. S is the largest number of sessions in the batch. For a dataset with fewer sessions, the columns above its own number are empty. |
+| `in_S_sessions` … `in_1_sessions` | Number of registered cells found in exactly k sessions. S is the largest number of sessions in the batch. For a dataset with fewer sessions, the columns above its own number are empty: its "all sessions" count is in its own column. |
 | `mean_cells_per_session` | Mean number of cells per session. |
-| `pct_in_all` | Cells found in all sessions ÷ `n_cells`, as in `_batch_results.csv`. |
-| `pct_in_all_of_mean` | Cells found in all sessions ÷ `mean_cells_per_session`. |
+| `pct_in_all` | As in `_batch_results.csv`, in percent. |
+| `pct_in_all_of_mean` | As in `_batch_results.csv`, in percent. |
 
-Section 7.2 compares the two fractions.
+Section 7.2 compares the two percentages.
 
-### 5.4 Batch log
+### 5.4 `_batch_warnings.png`
+
+![Warnings figure](images/batch_warnings.png)
+
+*Example: the CellReg sample mouse (M01) and five modified copies of it. M02 has no session 3D. M03 lost 70 % of the cells of session 4D. M04 keeps 45 random cells per session. Session 3D of M05 is shifted by 45 px. Session 5D of M06 is mirrored, so it shows another field of view.*
+
+One picture of the whole batch, one row per dataset.
+
+- **Left: grid.** One column per warning. Grey = no warning, yellow, red. Dark
+  grey = the dataset failed.
+- **Right: values.** One panel per value: median cells per session, worst
+  session ÷ median, lowest cross-correlation, largest shift, model error,
+  session link ratio, match %. Dashed lines are the yellow and red limits. The dot colour shows
+  how the value compares with them. In the match panel, the solid line is the
+  batch median. Its limits are absent when the batch is too small (section 6).
+
+The cell-count panel has a logarithmic axis. If the figure fails, the batch
+writes a `WARN` line to the log and continues.
+
+### 5.5 Batch log
 
 Each line has the form `[HH:MM:SS] [LEVEL] DATASET: message`. `LEVEL` is
 `INFO`, `WARN` or `ERROR`. `GLOBAL` marks lines about the whole batch. The
-log records the scan, each alignment mode that the batch tried, the chosen
+log records the scan, the cell map columns, the datasets with another number
+of sessions, each alignment mode that the batch tried, the chosen model,
 P_same and FPR, each skipped figure, and the full error report of a failed
 dataset.
 
-### 5.5 Files for each dataset
+### 5.6 Files for each dataset
 
 - `<dataset>_cellmap.csv`, in the output folder: the cell map
   (`cell_to_index_map`, see 7.1) as a CSV file without a header. Each row is
-  one registered cell. Each column is one session, in session order. The value
-  is the number of the cell in the input file of that session. 0 = not found.
-- `cellRegistered_*.mat`: the CellReg registration result (7.1).
+  one registered cell. Each column is one session name of the batch, in
+  session order (1.5). The value is the number of the cell in the input file
+  of that session. 0 = not found. A missing session is a column of zeros.
+- `cellRegistered_*.mat`: the CellReg registration result (7.1). It has the
+  dataset's own sessions only, without zero columns.
 - `logFile_*.txt`: the CellReg log file, written by CellReg's
   `save_log_file` in the same format as the CellReg GUI: parameters, number of cells, FPR, FNR, scores, model error.
 - `Figures/`: the CellReg figures of stages 1–5, as `.fig` and `.png`. The
@@ -466,57 +534,60 @@ dataset.
 
 ## 6. Quality warnings
 
-After all datasets, `detect_anomalies.m` runs 12 checks on each dataset that
-did not fail. Each check gives a severity: 0 = none, 1 = yellow, 2 = red.
+After all datasets, `detect_anomalies.m` gives each dataset that did not fail
+six warnings. Each warning is none, yellow or red. A warning takes the worst
+level of its rules.
 
-There are three kinds of checks:
+- **Yellow:** look at the dataset if you have time.
+- **Red:** look at the dataset before you use it.
 
-- **Fixed limit.** The value is compared with a fixed limit. Result: 2 or 0.
-- **Within the dataset.** The values of the sessions of one dataset are
-  converted to z-scores. If any |z| is above `z_threshold`, the result is 2.
-  Else it is 0.
-- **Compared with the batch.** The value of the dataset is compared with all
-  datasets of the batch that did not fail. Red (2): the value is more than
-  `z_threshold` standard deviations from the batch mean, on the bad side.
-  Yellow (1): the value is in the worst quarter of the batch (below the first
-  quartile or above the third quartile, on the bad side), but not red. These
-  checks need at least 3 datasets that did not fail.
-
-| Code | GUI header | Kind | Rule | What it can mean |
+| Warning | GUI header | Rules: yellow | Rules: red | What it can mean |
 |---|---|---|---|---|
-| W1 | `%match` | batch | `pct_in_all` low (bad side: low). | Few cells are tracked across all sessions, compared with the other datasets. Causes: a bad session, bad alignment, or a real difference. |
-| W2 | `cells/sess` | within | Number of cells per session; any session with \|z\| > `z_threshold`. | One session has many more or many fewer cells than the others. |
-| W2b_hard | `ratio>3` | fixed | Largest ÷ smallest cells per session > 3. A session with 0 cells counts as an infinite ratio. | Same as W2, with a fixed limit. |
-| W2b_rel | `ratio rel` | batch | The same ratio, high (bad side: high). | Cell numbers per session vary more than in the other datasets. |
-| W3a | `low xcorr` | fixed | Any non-reference session has maximal cross-correlation with the reference < `min_xcorr` (0.3). Always red after a forced alignment (4.3). | The alignment is probably bad. Look at `Stage 2 - pre vs post alignment`. |
-| W3b | `xcorr rel` | within | Cross-correlations of the non-reference sessions; any \|z\| > `z_threshold`. | One session aligns worse than the others. |
-| W4 | `FPR unreach` | fixed | No P_same threshold up to 0.95 gives FPR ≤ `fpr_max` (4.5). | The same-cell and different-cell distributions overlap too much. |
-| W5a | `big shift` | fixed | Any non-reference session shift > `max_translation_px` (30 px). Shift = √(dx² + dy²) in pixels. | The field of view moved a lot. Check that the sessions show the same place. |
-| W5b | `shift rel` | within | Shifts of the non-reference sessions; any \|z\| > `z_threshold`. | One session moved more than the others. |
-| W6a | `bad MSE` | fixed | MSE of the chosen model > `max_mse` (0.1). CellReg itself warns above 0.1. | The model does not fit the data well. Look at `Stage 3 - model`. Datasets with few cells can have MSE > 0.1 from histogram noise while the fit looks good. |
-| W6b | `MSE rel` | batch | MSE high (bad side: high). | The model fits worse than in the other datasets. |
-| W7 | `sess count` | fixed | Number of sessions ≠ `expected_n_sessions`. | A session file is missing or extra. |
+| `session_count` | Sessions | – | Number of sessions ≠ `expected_n_sessions`. | A session file is missing or extra. The dataset was matched; its cell map has zero columns for the missing sessions (1.5). |
+| `few_cells` | Few cells | Median cells per session < 60. | < 30. | The model and the statistics are less reliable with few cells. Such datasets often also get `model_fit` and `alignment` warnings. |
+| `cell_drop` | Cell drop | Cells of the worst session ÷ median session < 0.6. | < 0.4. | One session lost many cells: check its recording and its curation. `session` names it. |
+| `alignment` | Alignment | Lowest cross-correlation with the reference < 0.3, or largest shift > 30 px. | Lowest cross-correlation < 0.25, or no alignment mode passed the gate (4.3). | A session does not look like the reference. Look at `Stage 2 - pre vs post alignment`. A large shift can be correct, but less of the field of view overlaps. |
+| `model_fit` | Model fit | Model error (MSE) > 0.1. | MSE > 0.15, or no P_same up to 0.95 reaches `fpr_max` (4.5). | The model does not fit the data well. Look at `Stage 3 - model`. Datasets with few cells can have a high MSE from histogram noise while the fit looks good. |
+| `low_match` | Low match | Session link ratio < 0.6, or match % more than 2 robust SD below the batch median. | No cell is found in all sessions, or session link ratio < 0.4, or match % more than 3 robust SD below the batch median. | Few cells are tracked across all sessions. A low session link ratio points to one session (`session` names it): it is usually misaligned or shows another field of view. Other causes: a bad session, bad alignment, or a real difference. |
 
-**Read yellow as relative.** In every batch, about one dataset in four is in
-the worst quarter of each "batch" check, also when all datasets are good. A
-yellow flag says "look if you have time". A red flag says "look before you use
-this dataset".
+All limits are config parameters (section 3). The table shows the defaults.
 
-**Small numbers limit the z-scores.** For n values, the largest possible
-|z| is (n−1)/√n. This is 1.79 for n = 5 and 2.04 for n = 6. With the default
-`z_threshold` = 2:
+**Session link ratio.** For each session, the batch takes the share of its
+cells that are found in at least one other session. The ratio is the share of
+the worst session ÷ the median share of the dataset. In good datasets each
+session links about equally (ratio 0.6–1). A session that does not overlap
+with the others (wrong alignment, another field of view) has a ratio near 0.
+This rule compares the sessions of one dataset, so it works in a batch of any
+size. It needs 3 or more sessions: with 2 sessions both share the same linked
+cells.
 
-- W2 can fire only for datasets with 6 or more sessions.
-- W3b and W5b can fire only for datasets with 7 or more sessions (they use
-  the non-reference sessions only).
-- W1, W2b_rel and W6b can be red only in a batch with 6 or more datasets that
-  did not fail. Yellow needs 3 or more.
+**Match % and the batch comparison.** Match % is the lab definition: cells
+found in all sessions ÷ mean cells per session (`pct_in_all_of_mean`). The
+batch compares it with the median of the batch:
 
-For a study with 5 sessions per animal, W2, W3b and W5b are always 0. Use the
-fixed-limit checks (W2b_hard, W3a, W5a) for those cases.
+- robust SD = MAD ÷ 0.6745, where MAD is the median of |match % − median|;
+- robust z = (match % − median) ÷ robust SD.
 
-The code is in `BatchCellReg/detect_anomalies.m`. The texts of the decode
-line are in `BatchCellReg/anomaly_decode_map.m`.
+The median and the MAD do not change much when one dataset is bad. So a bad
+dataset cannot hide itself, as it can with a mean and an SD. The comparison
+uses only the datasets with `expected_n_sessions` sessions, because a dataset
+with fewer sessions has more cells "in all sessions" by construction. It needs
+at least 5 such datasets, and it assumes that most of them are good. With
+fewer, only the other two rules of `low_match` work.
+
+**Why these limits.** We tested the rules on 83 datasets that the lab matched
+before (October 2026): HOS 42 mice × 5 sessions, HOS-J 13 × 4, LNOF 22 × 4,
+LT1 6 × 4. The red flags were HOS D01, D04, D11 and J21 (the four mice that the
+lab excluded), HOS D17 (session 1 has 118 cells, the others about 400), HOS
+F11 (29 cells per session), and LT1 K02, K08 and K09 (sparse; K08 also failed
+alignment). LNOF and HOS-J got no red flag. The old rules (version 1)
+flagged 38 of the 83 datasets; the new rules flag 19. The session link ratio
+was below 0.4 only in HOS D01 (session 5: 0.15). The good datasets had 0.62 or
+more.
+
+The code is in `BatchCellReg/detect_anomalies.m`. The texts of the decode area
+are in `BatchCellReg/anomaly_decode_map.m`, the texts of the **?** buttons in
+`BatchCellReg/parameter_info.m`.
 
 ---
 
@@ -535,7 +606,7 @@ map = s.cell_registered_struct.cell_to_index_map;   % registered cells x session
 ```
 
 Outside MATLAB, use `CC_H02_cellmap.csv` in the output folder. It holds the
-same map.
+same map, with a zero column for each missing session (1.5).
 
 `map(i, j)` is the index of registered cell `i` in session `j`, in the order
 of the input footprints. 0 means that the cell was not found in that session.
@@ -543,19 +614,23 @@ The other fields (`cell_scores`, `p_same_registered_pairs`,
 `spatial_footprints_corrected`, and so on) are described in the CellReg
 User Manual.
 
-### 7.2 Fraction of cells found in all sessions
+### 7.2 Percent of cells found in all sessions
 
 `pct_in_all` divides the cells found in all sessions by the number of
 registered cells. `pct_in_all_of_mean` divides them by the mean number of
-cells per session. The second value is larger. `_match_statistics.csv` gives
-both (5.3). To compute them from the map:
+cells per session. The second value is larger. It is the lab's "matching %"
+and the **Match %** of the GUI. `_batch_results.csv` and
+`_match_statistics.csv` give both, in percent. To compute them from the map:
 
 ```matlab
 in_all      = sum(all(map > 0, 2));
 per_session = sum(map > 0, 1);
-frac_of_registered = in_all / size(map, 1);        % = pct_in_all
-frac_of_mean       = in_all / mean(per_session);
+pct_in_all         = 100 * in_all / size(map, 1);
+pct_in_all_of_mean = 100 * in_all / mean(per_session);
 ```
+
+Use the map from the `.mat` file here. In the CSV cell map, a zero column of a
+missing session would make `all(map > 0, 2)` zero for every cell.
 
 State in your methods which definition you use.
 
@@ -575,10 +650,17 @@ fails.
 
 - The unit tests use small synthetic data. They take a few seconds.
 - `test_runs_on_shipped_cellreg_sample_data` runs the full batch on
-  `SampleData/` (5 sessions of one mouse). It takes 2–3 minutes.
+  `SampleData/` (5 sessions of one mouse) and on a copy of the mouse without
+  session `3D` (1.5). It takes 4–5 minutes.
+- `test_model_can_be_set_in_config` runs 2 sessions with the
+  centroid-distance model set in the config.
 - `test_runs_on_sample_data_our` needs a folder `SampleDataOur/` with our
   own data. This folder is not in the repository, so the test is reported as
   *Incomplete*. This is expected.
+
+GitHub Actions runs all tests on each push to `main` and on each pull request
+(`.github/workflows/tests.yml`): the latest MATLAB on Linux, Windows and
+macOS, and MATLAB R2021a on Linux. The GUI is not tested there.
 
 ---
 
@@ -588,8 +670,10 @@ fails.
   session number has one digit, so a dataset can have at most 9 day sessions
   (`1D`–`9D`).
 - **Fixed approach.** The registration approach is always probabilistic.
-  You cannot choose the model or the simple-threshold approach in the batch.
-  Use the CellReg GUI (`GUI/CellReg.m`) for one dataset when you need them.
+  You can choose the model (4.4), but not the simple-threshold approach. Use
+  the CellReg GUI (`GUI/CellReg.m`) for one dataset when you need it.
+- **Session order.** The batch sorts the sessions by file name (1.3). To
+  change the order, rename the files.
 - **Model choice in CellReg v1.6.0.** In `CellReg/choose_best_model.m`, lines
   28–29 compute the false positives and false negatives of the
   centroid-distance model at `ind_05_correlation` (the index of the
@@ -598,5 +682,5 @@ fails.
   imperfect. We did not change this CellReg file.
 - **Figures.** The `.mat` result does not contain the model data, so you
   cannot remake the figures from it. Run the dataset again to get them.
-- **Operating system.** The code does not depend on the operating system,
-  but we tested it on Windows only.
+- **Operating system.** The tests run on Linux, Windows and macOS (section
+  8). We used the GUI on Windows only.

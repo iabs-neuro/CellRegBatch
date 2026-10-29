@@ -1,5 +1,7 @@
 # CellRegBatch
 
+[![tests](https://github.com/iabs-neuro/CellRegBatch/actions/workflows/tests.yml/badge.svg)](https://github.com/iabs-neuro/CellRegBatch/actions/workflows/tests.yml)
+
 **Batch cell registration across calcium-imaging sessions, built on [CellReg](https://github.com/zivlab/CellReg).**
 
 CellRegBatch runs CellReg on many animals in one go. You point it at a folder
@@ -31,18 +33,26 @@ fixed rules and records each one:
 - **Alignment fallback.** If an alignment mode gives a poor result, it tries
   the next one: Translations → Translations and Rotations (±5°) → ±90° →
   Non-rigid.
+- **Missing sessions.** You set the number of sessions per animal. An animal
+  with fewer sessions is still registered and gets a red warning. Its cell map
+  has a column of zeros for each missing session, so all maps of a batch have
+  the same columns.
 - **Automatic P_same threshold.** It keeps the CellReg default of 0.5. It
   raises the threshold only when the estimated false-positive rate is above a
   target (0.03 by default).
-- **Quality warnings.** It runs 12 checks (W1–W7) on each dataset. Some compare
-  the dataset with the rest of the batch. Each check gives red, yellow or no
-  flag.
+- **Model choice.** By default CellReg chooses the model with the better fit.
+  You can set one model for all animals instead.
+- **Quality warnings.** Six warnings per dataset: Sessions, Few cells, Cell
+  drop, Alignment, Model fit, Low match. Each is red, yellow or none. Low match
+  also finds a session that hardly connects to the others, and compares the
+  dataset with the batch median (robust to one bad dataset).
 - **Outputs.** For each dataset you get the usual CellReg outputs
   (`cellRegistered_*.mat`, `logFile_*.txt`, all stage figures) and the cell
   map as a CSV file. For the batch you get a results table, a table of cells
-  found in 1…S sessions, a warnings table, a log and the exact config.
-- **GUI.** Three tabs: Setup, Parameters, Run & Results. The GUI can reload a
-  saved results table.
+  found in 1…S sessions, a warnings table, a picture of all warnings, a log
+  and the exact config.
+- **GUI.** Three tabs: Setup, Parameters, Run & Results, with a **?** button
+  next to each field. The GUI can reload a saved results table.
 
 ```mermaid
 flowchart TD
@@ -54,8 +64,8 @@ flowchart TD
     PS["Choose P_same: 0.5, or higher if FPR > 0.03"]
     S45["CellReg stages 4-5: initial registration, clustering"]
     OUT1["Per dataset: cellRegistered_*.mat, logFile_*.txt, figures"]
-    AN["After all datasets: quality checks W1-W7"]
-    OUT2["Per batch: _batch_results.csv, _match_statistics.csv,<br/>cell maps, warnings table, log, config"]
+    AN["After all datasets: six quality warnings"]
+    OUT2["Per batch: _batch_results.csv, _match_statistics.csv,<br/>cell maps, warnings table and figure, log, config"]
     IN --> SCAN --> S12 --> CHK
     CHK -->|"no: next mode<br/>Translations, Rotations ±5°, ±90°, Non-rigid"| S12
     CHK -->|yes| S3 --> PS --> S45 --> OUT1
@@ -70,6 +80,8 @@ Blue boxes are CellReg code. Yellow boxes are the batch layer.
 
 ![Run & Results tab after a batch](Docs/images/gui_results.png)
 
+![Warnings figure of a demo batch: the CellReg sample mouse and five damaged copies](Docs/images/batch_warnings.png)
+
 ## Quick start
 
 1. Clone the repository:
@@ -77,7 +89,7 @@ Blue boxes are CellReg code. Yellow boxes are the batch layer.
 2. In MATLAB, go to the repository folder.
 3. Start the GUI: `run BatchCellReg_GUI/BatchCellReg.m`
 4. On the **Setup** tab, select the folder with your session files. Click
-   **Scan**.
+   **Scan**. Set **Expected sessions per mouse**.
 5. On the **Parameters** tab, set **Microns per pixel** for your microscope.
 6. On the **Run & Results** tab, click **Run batch**.
 
@@ -93,12 +105,14 @@ To try the tool first on the sample data that comes with CellReg, follow the
 | [Guide](Docs/GUIDE.md) | Step by step: install, run the sample data, run your data, read the results. Start here. |
 | [Руководство (Guide in Russian)](Docs/GUIDE_ru.md) | The same guide in Russian. |
 | [Manual](Docs/MANUAL.md) | Reference: file naming, all parameters, the pipeline in detail, output files and columns, every warning, scripting, tests, known limitations. |
+| [Справочник (Manual in Russian)](Docs/MANUAL_ru.md) | The same manual in Russian. |
 | [CellReg User Manual](Docs/User%20Manual.docx) | The original CellReg manual by the Ziv lab. It explains the method and the CellReg GUI. |
 
 ## Requirements
 
-- MATLAB R2020a or newer. The tests pass on R2020a and R2025b. We checked the
-  GUI on R2025b.
+- MATLAB R2020a or newer. We run the tests on R2020a and R2025b (Windows), and
+  GitHub Actions runs them on Linux, Windows and macOS. We checked the GUI on
+  R2025b on Windows.
 - Image Processing Toolbox, Statistics and Machine Learning Toolbox and
   Optimization Toolbox. CellReg needs them.
 - Parallel Computing Toolbox is optional. It speeds up alignment. Without it,

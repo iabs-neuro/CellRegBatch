@@ -1,18 +1,21 @@
-function m = anomaly_decode_map()
-%ANOMALY_DECODE_MAP code -> struct(short, desc) for results-table warnings.
-%   short: 1-2 word column-header tag. desc: full click-to-decode sentence.
-    e = @(s,d) struct('short', s, 'desc', d);
-    m = containers.Map('KeyType','char','ValueType','any');
-    m('W1')       = e('%match',     'W1 - %match population outlier: pct_in_all low vs batch (graded).');
-    m('W2')       = e('cells/sess', 'W2 - cells/session intra-dataset z-outlier.');
-    m('W2b_hard') = e('ratio>3',    'W2b_hard - max/min cells-per-session ratio > 3 (hard).');
-    m('W2b_rel')  = e('ratio rel',  'W2b_rel - cells-per-session ratio high vs batch (graded).');
-    m('W3a')      = e('low xcorr',  'W3a - low cross-correlation (hard): min(max_xcorr) < min_xcorr (0.3) = bad alignment.');
-    m('W3b')      = e('xcorr rel',  'W3b - low cross-correlation relative: intra-dataset z of max_xcorr.');
-    m('W4')       = e('FPR unreach','W4 - P_same FPR target unreachable (P_same capped at 0.95).');
-    m('W5a')      = e('big shift',  'W5a - large alignment shift (hard): max |shift_px| > max_translation_px (30).');
-    m('W5b')      = e('shift rel',  'W5b - large alignment shift relative: intra-dataset z of per-session shift.');
-    m('W6a')      = e('bad MSE',    'W6a - bad model fit (hard): MSE_model > max_mse (0.1).');
-    m('W6b')      = e('MSE rel',    'W6b - bad model fit relative: MSE high vs batch (graded).');
-    m('W7')       = e('sess count', 'W7 - session count != expected_n_sessions.');
+function [m, order] = anomaly_decode_map()
+%ANOMALY_DECODE_MAP Warning name -> struct(short, desc), and the column order.
+%   short: column header for the results table. desc: one-line explanation
+%   shown when the user clicks a warning cell.
+    order = {'session_count', 'few_cells', 'cell_drop', 'alignment', 'model_fit', 'low_match'};
+    e = @(s, d) struct('short', s, 'desc', d);
+    m = containers.Map('KeyType', 'char', 'ValueType', 'any');
+    m('session_count') = e('Sessions', ['Session count: the dataset has more or fewer ' ...
+        'sessions than "Expected sessions". It was matched; its cell map has a zero ' ...
+        'column for each missing session.']);
+    m('few_cells') = e('Few cells', ['Few cells: the median number of cells per ' ...
+        'session is low. With few cells the model and the statistics are less reliable.']);
+    m('cell_drop') = e('Cell drop', ['Cell drop: one session has far fewer cells than ' ...
+        'the median session of this dataset (check that session''s recording and curation).']);
+    m('alignment') = e('Alignment', ['Alignment: low cross-correlation with the reference ' ...
+        'session or forced alignment (red), or a large shift of the field of view (yellow).']);
+    m('model_fit') = e('Model fit', ['Model fit: the probabilistic model fits the data ' ...
+        'poorly (high MSE), or no P_same reaches the FPR target (red).']);
+    m('low_match') = e('Low match', ['Low match: no cell is found in all sessions (red), ' ...
+        'or the match % is far below the batch median (robust z).']);
 end

@@ -8,6 +8,8 @@ function result = scan_input_folder(input_folder)
 %   result.datasets(k).sessions(j).file_path
 %   result.datasets(k).skip                 logical
 %   result.datasets(k).skip_reason          string
+%   result.session_names                    sorted union of session_ids over
+%                                           the datasets that are not skipped
 %   result.unparsed                         cellstr of filenames
 
     pattern = '^([A-Za-z0-9]+)_([A-Za-z]{1,2}\d{2})_(\dD|\dT)(_\dT)?.*\.mat$';
@@ -71,5 +73,14 @@ function result = scan_input_folder(input_folder)
         end
     end
 
-    result = struct('datasets', datasets, 'unparsed', {unparsed});
+    % The union defines the columns of every cell map in the batch: a
+    % dataset without one of these sessions gets a column of zeros there.
+    session_names = {};
+    for k = find(~[datasets.skip])
+        session_names = [session_names, {datasets(k).sessions.session_id}]; %#ok<AGROW>
+    end
+    session_names = unique(session_names);
+
+    result = struct('datasets', datasets, 'session_names', {session_names}, ...
+        'unparsed', {unparsed});
 end

@@ -10,7 +10,8 @@ function summary = batch_run(input_folder, cfg, opts)
 %                          non-skipped datasets. Present but empty: none.
 %
 %   Returns summary struct: results, anomalies, output_dir, log_file, results_csv,
-%   detail_csv, match_stats_csv, n_succeeded, n_failed, n_with_warnings, stopped.
+%   detail_csv, match_stats_csv, warnings_png, n_succeeded, n_failed,
+%   n_with_warnings, stopped.
 
     if nargin < 3; opts = struct(); end
     if ~isfield(opts, 'live_log_callback'); opts.live_log_callback = []; end
@@ -28,6 +29,18 @@ function summary = batch_run(input_folder, cfg, opts)
     config_to_json(cfg, fullfile(output_dir, '_batch_config.json'));
     logger.info('GLOBAL', 'input=%s, output=%s, datasets=%d, unparsed=%d', ...
         input_folder, output_dir, numel(scan.datasets), numel(scan.unparsed));
+    expected = cfg.cellreg.expected_n_sessions;
+    logger.info('GLOBAL', 'cell map columns (sessions of the batch): %s', ...
+        strjoin(scan.session_names, ', '));
+    if numel(scan.session_names) ~= expected
+        logger.warn('GLOBAL', ['the batch has %d session names, expected %d: ' ...
+            'check the file names'], numel(scan.session_names), expected);
+    end
+    for c = check_session_counts(scan, expected)
+        if ~c.ok
+            logger.warn(c.dataset_id, 'session count: %s (will be matched and flagged red)', c.text);
+        end
+    end
 
     results = struct([]);
     stopped = false;
@@ -50,7 +63,7 @@ function summary = batch_run(input_folder, cfg, opts)
         sub = fullfile(output_dir, d.dataset_id);
         if ~exist(sub, 'dir'); mkdir(sub); end
         try
-            r = run_single_dataset(d, cfg, sub, logger);
+            r = run_single_dataset(d, cfg, sub, logger, scan.session_names);
             logger.info(d.dataset_id, 'done (%d cells; in %s sessions: %s)', ...
                 r.match_stats(1), ...
                 strjoin(arrayfun(@num2str, numel(r.sessions):-1:1, 'UniformOutput', false), '/'), ...
@@ -66,13 +79,22 @@ function summary = batch_run(input_folder, cfg, opts)
     end
 
     at = cfg.anomaly_thresholds;
-    at.expected_n_sessions = cfg.cellreg.expected_n_sessions;
+    at.expected_n_sessions = expected;
     at.fpr_max = cfg.p_same_tuning.fpr_max;
+    at.alignment_min_xcorr = cfg.cellreg.alignment_min_xcorr;
     anomalies = detect_anomalies(results, at);
 
     [results_csv, detail_csv] = export_results(results, anomalies, output_dir);
     match_stats_csv = fullfile(output_dir, '_match_statistics.csv');
     write_cell_csv(match_statistics_table(results), match_stats_csv);
+    warnings_png = fullfile(output_dir, '_batch_warnings.png');
+    try
+        plot_batch_warnings(results, anomalies, at, warnings_png);
+    catch ME
+        % The figure is a summary of the CSV files; never lose a batch over it.
+        logger.warn('GLOBAL', 'warnings figure skipped: %s', ME.message);
+        warnings_png = '';
+    end
 
     n_succeeded = sum(arrayfun(@(r) isempty(r.error), results));
     n_failed    = numel(results) - n_succeeded;
@@ -92,6 +114,7 @@ function summary = batch_run(input_folder, cfg, opts)
         'results_csv', results_csv, ...
         'detail_csv', detail_csv, ...
         'match_stats_csv', match_stats_csv, ...
+        'warnings_png', warnings_png, ...
         'n_succeeded', n_succeeded, ...
         'n_failed', n_failed, ...
         'n_with_warnings', n_warned, ...
@@ -105,7 +128,7 @@ function r = normalize_result(r)
         'alignment_shift_px', [], 'reference_session_index', 1, ...
         'MSE_model', NaN, 'best_model_string', '', 'chosen_p_same', NaN, ...
         'chosen_fpr', NaN, 'p_same_unreachable', false, ...
-        'alignment_mode', '', 'forced_low_xcorr', false);
+        'alignment_mode', '', 'forced_low_xcorr', false, 'missing_sessions', {{}});
     fns = fieldnames(defaults);
     for k = 1:numel(fns)
         if ~isfield(r, fns{k})
@@ -116,49 +139,49 @@ function r = normalize_result(r)
 end
 
 function n = count_with_warnings(a)
-    if isempty(a.flags); n = 0; return; end
-    cnt = 0;
-    fns = fieldnames(a.flags(1));
+    n = 0;
     for k = 1:numel(a.flags)
         if any(structfun(@(x) x, a.flags(k)))
-            cnt = cnt + 1;
+            n = n + 1;
         end
     end
-    n = cnt;
 end
 
 function [results_csv, detail_csv] = export_results(results, anomalies, output_dir)
     results_csv = fullfile(output_dir, '_batch_results.csv');
     detail_csv  = fullfile(output_dir, '_batch_warnings_detail.csv');
 
-    rows = {};
-    rows(end+1, :) = {'dataset_id', 'n_sessions', 'n_cells', 'pct_in_all', 'chosen_fpr', ...
-        'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7', ...
-        'W3a_min_xcorr', 'W5a_max_shift_px', 'W6a_mse', 'W2b_ratio', 'error'};
+    [~, names] = anomaly_decode_map();
+    rows = [{'dataset_id', 'n_sessions', 'missing_sessions', 'n_cells', ...
+        'pct_in_all', 'pct_in_all_of_mean', 'chosen_p_same', 'chosen_fpr_pct', ...
+        'model', 'alignment_mode'}, names, ...
+        {'median_cells', 'worst_session_ratio', 'min_xcorr', 'max_shift_px', ...
+        'model_mse', 'error'}];
     for k = 1:numel(results)
         r = results(k);
         f = anomalies.flags(k); m = anomalies.metrics(k);
-        rows(end+1, :) = { ...
-            r.dataset_id, numel(r.sessions), maybe_first(r.match_stats), ...
-            ratio(r.match_stats), r.chosen_fpr, ...
-            f.W1, f.W2, f.W2b_hard, f.W2b_rel, f.W3a, f.W3b, f.W4, f.W5a, f.W5b, f.W6a, f.W6b, f.W7, ...
-            m.W3a_min_xcorr, m.W5a_max_shift, m.W6a_mse, m.W2b_ratio, r.error}; %#ok<AGROW>
+        n_cells = 0; in_all = 0;
+        if ~isempty(r.match_stats); n_cells = r.match_stats(1); in_all = r.match_stats(2); end
+        pct = NaN; pct_mean = NaN;
+        if isempty(r.error)
+            pct = 100 * in_all / max(n_cells, 1);
+            pct_mean = 100 * in_all / max(mean(r.n_cells_per_session), 1);
+        end
+        sev = cellfun(@(nm) f.(nm), names, 'UniformOutput', false);
+        rows(end+1, :) = [{r.dataset_id, numel(r.sessions), strjoin(r.missing_sessions, ' '), ...
+            n_cells, pct, pct_mean, r.chosen_p_same, 100 * r.chosen_fpr, ...
+            r.best_model_string, r.alignment_mode}, sev, ...
+            {m.median_cells, m.worst_session_ratio, m.min_xcorr, m.max_shift_px, ...
+            m.model_mse, r.error}]; %#ok<AGROW>
     end
     write_cell_csv(rows, results_csv);
 
-    detail = {'dataset_id', 'session', 'anomaly_type', 'value', 'threshold', 'severity'};
+    detail = {'dataset_id', 'session', 'warning', 'rule', 'value', 'threshold', 'severity'};
     for d = anomalies.details
-        detail(end+1, :) = {d.dataset_id, d.session, d.anomaly_type, d.value, d.threshold, d.severity}; %#ok<AGROW>
+        detail(end+1, :) = {d.dataset_id, d.session, d.warning, d.rule, ...
+            d.value, d.threshold, d.severity}; %#ok<AGROW>
     end
     write_cell_csv(detail, detail_csv);
-end
-
-function v = maybe_first(s)
-    if isempty(s); v = 0; else; v = s(1); end
-end
-
-function v = ratio(s)
-    if numel(s) < 2 || s(1) == 0; v = NaN; else; v = s(2)/s(1); end
 end
 
 function write_cell_csv(rows, path)
@@ -190,7 +213,7 @@ function write_cell_csv(rows, path)
         for c = 1:size(rows, 2)
             v = rows{r, c};
             if islogical(v); s = ternary(v, '1', '0');
-            elseif isnumeric(v) && isscalar(v); s = num2str(v);
+            elseif isnumeric(v) && isscalar(v); s = sprintf('%.15g', round(v, 3));
             elseif ischar(v); s = strrep(v, ',', ';');
             else; s = ''; end
             if c == 1; line = s; else; line = [line ',' s]; end %#ok<AGROW>

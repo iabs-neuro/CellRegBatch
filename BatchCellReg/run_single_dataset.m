@@ -1,10 +1,12 @@
-function result = run_single_dataset(dataset, cfg, out_subdir, logger)
+function result = run_single_dataset(dataset, cfg, out_subdir, logger, session_names)
 %RUN_SINGLE_DATASET Run CellReg Stages 1-5 on one (exp, mouse) dataset.
 %
 %   dataset: struct from scan_input_folder (one element of result.datasets).
 %   cfg:     full batch config struct (see batch_default_config).
 %   out_subdir: directory to write outputs into (created if missing).
 %   logger: batch_logger handle.
+%   session_names (optional): session ids of the whole batch. They set the
+%     columns of <dataset>_cellmap.csv; default: this dataset's sessions.
 
     % Vendor plot_* functions save but never close their figures; with hidden
     % figures holding full-FOV images, RAM grows dataset by dataset until the
@@ -17,7 +19,14 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
     fig_vis = cfg.cellreg.figures_visibility;
 
     tag = dataset.dataset_id;
-    logger.info(tag, 'sessions: %s', strjoin({dataset.sessions.session_id}, ', '));
+    sessions = {dataset.sessions.session_id};
+    if nargin < 5 || isempty(session_names); session_names = sessions; end
+    missing_sessions = setdiff(session_names, sessions);
+    logger.info(tag, 'sessions: %s', strjoin(sessions, ', '));
+    if ~isempty(missing_sessions)
+        logger.warn(tag, 'no session %s: its cell map column will be zeros', ...
+            strjoin(missing_sessions, ', '));
+    end
 
     file_paths = {dataset.sessions.file_path};
     spatial_footprints = prepare_session_files(file_paths);
@@ -238,8 +247,15 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
             norm_max_dist, microns_per_pixel, figures_dir, fig_vis, p_given_sc, ...
             sc_dist, cdf_sc, unc_sc, tpr_sc, fpr_sc));
 
-    best_model = choose_best_model(MSE_cd, cd_same, cd_diff, p_given_cd, ...
+    best_fit_model = choose_best_model(MSE_cd, cd_same, cd_diff, p_given_cd, ...
         MSE_sc, sc_same, sc_diff, p_given_sc);
+    model_setting = cfg.cellreg.initial_registration_type;
+    if any(strcmp(model_setting, {'Spatial correlation', 'Centroid distance'}))
+        best_model = model_setting;
+        logger.info(tag, 'model %s set in config (best fit: %s)', best_model, best_fit_model);
+    else
+        best_model = best_fit_model;
+    end
 
     [a2a_psame_cd, a2a_psame_sc] = compute_p_same(a2a_cd, p_given_cd, centers_of_bins, ...
         a2a_sc, p_given_sc);
@@ -333,10 +349,12 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
         end
         save(fullfile(out_subdir, ['cellRegistered_' stamp '.mat']), 'cell_registered_struct', '-v7.3');
         % Plain-CSV copy of the cell map for tools outside MATLAB: rows =
-        % registered cells, columns = sessions, value = cell index in that
-        % session's input file, 0 = not found. Kept next to the dataset
-        % folders so one folder holds the maps of the whole batch.
-        writematrix(opt_map, fullfile(fileparts(out_subdir), [dataset.dataset_id '_cellmap.csv']));
+        % registered cells, columns = the batch's sessions, value = cell
+        % index in that session's input file, 0 = not found. A missing
+        % session is a column of zeros, so all maps of a batch line up.
+        % Kept next to the dataset folders: one folder holds the whole batch.
+        writematrix(expand_cell_map(opt_map, sessions, session_names), ...
+            fullfile(fileparts(out_subdir), [dataset.dataset_id '_cellmap.csv']));
         if strcmp(best_model, 'Spatial correlation')
             save_log_file(out_subdir, file_paths, microns_per_pixel, ax, ay, ...
                 alignment_type, ref_idx, max_dist, n_bins, best_model, init_thresh, ...
@@ -359,7 +377,8 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger)
 
     result = struct();
     result.dataset_id = dataset.dataset_id;
-    result.sessions = {dataset.sessions.session_id};
+    result.sessions = sessions;
+    result.missing_sessions = missing_sessions;
     result.n_cells_per_session = stats.n_cells_per_session;
     result.match_stats = stats.match_stats;
     result.maximal_cross_correlation = max_xcorr;

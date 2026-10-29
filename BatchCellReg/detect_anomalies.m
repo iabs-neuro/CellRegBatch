@@ -1,168 +1,180 @@
 function out = detect_anomalies(results, thresh)
-%DETECT_ANOMALIES Per-dataset anomaly checks with 3-level severity model.
-%   results: struct array (see run_single_dataset). Failed datasets (error nonempty)
-%     are skipped — their flags struct is returned with all zeros.
-%   thresh: struct with fields z_threshold, max_translation_px, min_xcorr, max_mse;
-%     optional expected_n_sessions (W7) and fpr_max (reported for W4).
+%DETECT_ANOMALIES Six named warnings per dataset, each none / yellow / red.
+%   results: struct array (see run_single_dataset). Failed datasets (error
+%     nonempty) get no warnings.
+%   thresh: cfg.anomaly_thresholds plus expected_n_sessions and fpr_max;
+%     optional alignment_min_xcorr (reported when alignment was forced).
 %
-%   Severity codes (double): 0=none, 1=yellow, 2=red.
+%   Warnings (fields of out.flags, in pipeline order):
+%     session_count  session count differs from expected_n_sessions    red
+%     few_cells      median cells per session is low                    yellow/red
+%     cell_drop      worst session has far fewer cells than the median  yellow/red
+%     alignment      low cross-correlation or forced alignment (red),
+%                    large shift (yellow)                               yellow/red
+%     model_fit      high model MSE; FPR target not reached (red)       yellow/red
+%     low_match      no cell found in all sessions (red); match % far
+%                    below the batch median (robust z)                  yellow/red
+%   Severity codes: 0 = none, 1 = yellow, 2 = red.
 %
-%   Batch-distribution checks (W1, W6b, W2b_rel): graded severity via batch_severity.
-%   All other checks (W2, W2b_hard, W3a, W3b, W4, W5a, W5b, W6a): binary — 2 if
-%     triggered, 0 otherwise.
+%   The batch comparison of low_match uses median and MAD, so one bad
+%   dataset cannot hide itself by widening the spread. It needs at least
+%   MIN_BATCH datasets with the expected session count.
 %
-%   out.details has one element per fired warning: dataset_id, session ('-' for
-%   dataset-level checks), anomaly_type, value, threshold (the limit the value
-%   crossed, in the same units), severity.
+%   out.details: one element per fired rule: dataset_id, session ('-' when
+%   the rule is about the whole dataset), warning, rule, value, threshold
+%   (the limit the value crossed, same units), severity ('yellow'/'red').
+%   out.metrics: the value behind each warning, for tables and figures.
+%   out.batch: median and limits of the match comparison (NaN when the
+%   batch is too small), for the warnings figure.
+
+    MIN_BATCH = 5;
 
     n = numel(results);
     dataset_ids = {};
     % struct([]) (no dataset processed) has no fields to index.
     if n > 0; dataset_ids = {results.dataset_id}; end
-    flags_template = struct( ...
-        'W1',    0, 'W2',    0, 'W2b_hard', 0, 'W2b_rel', 0, ...
-        'W3a',   0, 'W3b',   0, 'W4',       0, ...
-        'W5a',   0, 'W5b',   0, ...
-        'W6a',   0, 'W6b',   0, 'W7',       0);
-    flags = repmat(flags_template, 1, n);
-    metrics = repmat(struct( ...
-        'W3a_min_xcorr', NaN, 'W5a_max_shift', NaN, ...
-        'W6a_mse', NaN, 'fpr', NaN, 'pct_in_all', NaN, ...
-        'W2b_ratio', NaN, 'n_sessions', NaN), 1, n);
-    details = struct('dataset_id', {}, 'session', {}, 'anomaly_type', {}, ...
+    [~, names] = anomaly_decode_map();
+    flags = repmat(cell2struct(num2cell(zeros(1, numel(names))), names, 2), 1, n);
+    metrics = repmat(struct('median_cells', NaN, 'worst_session_ratio', NaN, ...
+        'min_xcorr', NaN, 'max_shift_px', NaN, 'model_mse', NaN, ...
+        'match_pct', NaN, 'match_z', NaN), 1, n);
+    details = struct('dataset_id', {}, 'session', {}, 'warning', {}, 'rule', {}, ...
         'value', {}, 'threshold', {}, 'severity', {});
 
+    t = thresh;
+    has_expected = isfield(t, 'expected_n_sessions') && ~isempty(t.expected_n_sessions);
     fpr_max = NaN;
-    if isfield(thresh, 'fpr_max'); fpr_max = thresh.fpr_max; end
+    if isfield(t, 'fpr_max'); fpr_max = t.fpr_max; end
+    gate = NaN;
+    if isfield(t, 'alignment_min_xcorr'); gate = t.alignment_min_xcorr; end
 
-    succeeded = arrayfun(@(r) isempty(r.error), results);
-
-    % --- Precompute batch-level vectors over succeeded datasets ---
-    pct_in_all_vec = nan(1, n);
-    mse_vec        = nan(1, n);
-    ratio_vec      = nan(1, n);
-
-    for k = find(succeeded)
+    succeeded = false(1, n);
+    comparable = false(1, n);
+    match = nan(1, n);
+    for k = 1:n
         r = results(k);
-        pct_in_all_vec(k) = r.match_stats(2) / max(r.match_stats(1), 1);
-        mse_vec(k)        = r.MSE_model;
-        nc = r.n_cells_per_session;
-        mn = min(nc);
-        if mn <= 0
-            ratio_vec(k) = Inf;
-        else
-            ratio_vec(k) = max(nc) / mn;
-        end
-        metrics(k).pct_in_all  = pct_in_all_vec(k);
-        metrics(k).W6a_mse     = r.MSE_model;
-        metrics(k).fpr         = r.chosen_fpr;
-        metrics(k).W2b_ratio   = ratio_vec(k);
-        metrics(k).n_sessions  = numel(r.sessions);
+        succeeded(k) = isempty(r.error);
+        if ~succeeded(k); continue; end
+        match(k) = r.match_stats(2) / max(mean(r.n_cells_per_session), 1);
+        % A dataset with missing sessions has a higher "in all sessions"
+        % share by construction, so it is not a fair member of the batch.
+        comparable(k) = ~has_expected || numel(r.sessions) == t.expected_n_sessions;
     end
 
-    z = thresh.z_threshold;
-    ns = sum(succeeded);
+    batch = struct('match_median', NaN, 'match_yellow', NaN, 'match_red', NaN, ...
+        'n_compared', sum(comparable));
+    match_scale = NaN;
+    if sum(comparable) >= MIN_BATCH
+        v = match(comparable);
+        med = median(v);
+        mad = median(abs(v - med));
+        if mad > 0
+            % MAD / 0.6745 estimates the SD for normal data (Iglewicz and
+            % Hoaglin modified z-score).
+            match_scale = mad / 0.6745;
+            batch.match_median = med;
+            batch.match_yellow = med - t.match_z_yellow * match_scale;
+            batch.match_red = med - t.match_z_red * match_scale;
+        end
+    end
 
     for k = find(succeeded)
         r = results(k);
         id = r.dataset_id;
+        nc = r.n_cells_per_session(:)';
 
-        % --- W1: pct_in_all batch-distribution check (bad=LOW), needs >=3 ---
-        if ns >= 3
-            [flags(k).W1, b] = batch_severity(pct_in_all_vec(succeeded), pct_in_all_vec(k), false, z);
-            if flags(k).W1
-                details = add_detail(details, id, '-', 'W1_pct_match_outlier', ...
-                    pct_in_all_vec(k), b, flags(k).W1);
+        % --- session_count ---
+        n_sess = numel(r.sessions);
+        if has_expected && n_sess ~= t.expected_n_sessions
+            if n_sess < t.expected_n_sessions
+                rule = 'fewer sessions than expected';
+            else
+                rule = 'more sessions than expected';
+            end
+            sess = '-';
+            if isfield(r, 'missing_sessions') && ~isempty(r.missing_sessions)
+                sess = strjoin(r.missing_sessions, ' ');
+            end
+            [flags(k), details] = fire(flags(k), details, id, sess, 'session_count', ...
+                rule, n_sess, t.expected_n_sessions, 2);
+        end
+
+        % --- few_cells ---
+        m = median(nc);
+        metrics(k).median_cells = m;
+        [sev, b] = level(m, t.few_cells_yellow, t.few_cells_red, 'low');
+        if sev
+            [flags(k), details] = fire(flags(k), details, id, '-', 'few_cells', ...
+                'median cells per session', m, b, sev);
+        end
+
+        % --- cell_drop ---
+        if m > 0
+            [mn, i] = min(nc);
+            ratio = mn / m;
+            metrics(k).worst_session_ratio = ratio;
+            [sev, b] = level(ratio, t.cell_drop_yellow, t.cell_drop_red, 'low');
+            if sev
+                [flags(k), details] = fire(flags(k), details, id, session_name(r, i), ...
+                    'cell_drop', 'cells in worst session / median session', ratio, b, sev);
             end
         end
 
-        % --- W2: n_cells_per_session intra-dataset outlier (binary) ---
-        n_cells = r.n_cells_per_session;
-        if numel(n_cells) >= 3
-            [hit, i, b] = zscore_outlier(n_cells, z);
-            if hit
-                flags(k).W2 = 2;
-                details = add_detail(details, id, session_name(r, i), 'W2_cells_outlier', ...
-                    n_cells(i), b, 2);
-            end
-        end
-
-        % --- W2b_hard: ratio > 3 (binary, red) ---
-        if ratio_vec(k) > 3
-            flags(k).W2b_hard = 2;
-            details = add_detail(details, id, '-', 'W2b_hard_ratio', ratio_vec(k), 3, 2);
-        end
-
-        % --- W2b_rel: ratio batch-distribution check (bad=HIGH), needs >=3 ---
-        if ns >= 3
-            [flags(k).W2b_rel, b] = batch_severity(ratio_vec(succeeded), ratio_vec(k), true, z);
-            if flags(k).W2b_rel
-                details = add_detail(details, id, '-', 'W2b_rel', ratio_vec(k), b, flags(k).W2b_rel);
-            end
-        end
-
-        % --- W3a/W3b: cross-correlation ---
-        xc = r.maximal_cross_correlation(:);
-        if any(xc < thresh.min_xcorr)
-            flags(k).W3a = 2;
+        % --- alignment ---
+        xc = r.maximal_cross_correlation(:)';
+        if ~isempty(xc)
             [v, i] = min(xc);
-            metrics(k).W3a_min_xcorr = v;
-            details = add_detail(details, id, session_name(r, xcorr_session_index(r, i)), ...
-                'W3a_low_xcorr_hard', v, thresh.min_xcorr, 2);
+            metrics(k).min_xcorr = v;
+            [sev, b] = level(v, t.xcorr_yellow, t.xcorr_red, 'low');
+            if sev
+                [flags(k), details] = fire(flags(k), details, id, ...
+                    session_name(r, xcorr_session_index(r, i)), 'alignment', ...
+                    'lowest cross-correlation with the reference', v, b, sev);
+            end
+            if isfield(r, 'forced_low_xcorr') && r.forced_low_xcorr
+                [flags(k), details] = fire(flags(k), details, id, ...
+                    session_name(r, xcorr_session_index(r, i)), 'alignment', ...
+                    'no alignment mode passed the gate', v, gate, 2);
+            end
         end
-        if numel(xc) >= 3
-            [hit, i, b] = zscore_outlier(xc, z);
-            if hit
-                flags(k).W3b = 2;
-                details = add_detail(details, id, session_name(r, xcorr_session_index(r, i)), ...
-                    'W3b_xcorr_outlier', xc(i), b, 2);
+        shifts = r.alignment_shift_px(:)';
+        non_ref = setdiff(1:numel(shifts), r.reference_session_index);
+        if ~isempty(non_ref)
+            [v, i] = max(shifts(non_ref));
+            metrics(k).max_shift_px = v;
+            if v > t.shift_yellow_px
+                [flags(k), details] = fire(flags(k), details, id, ...
+                    session_name(r, non_ref(i)), 'alignment', ...
+                    'largest alignment shift (px)', v, t.shift_yellow_px, 1);
             end
         end
 
-        % --- W4: FPR unreachable (binary) ---
+        % --- model_fit ---
+        metrics(k).model_mse = r.MSE_model;
+        [sev, b] = level(r.MSE_model, t.mse_yellow, t.mse_red, 'high');
+        if sev
+            [flags(k), details] = fire(flags(k), details, id, '-', 'model_fit', ...
+                'model fit error (MSE)', r.MSE_model, b, sev);
+        end
         if r.p_same_unreachable
-            flags(k).W4 = 2;
-            details = add_detail(details, id, '-', 'W4_fpr_unreachable', r.chosen_fpr, fpr_max, 2);
+            [flags(k), details] = fire(flags(k), details, id, '-', 'model_fit', ...
+                'FPR target not reached at P_same 0.95', r.chosen_fpr, fpr_max, 2);
         end
 
-        % --- W5a/W5b: alignment shift; exclude reference session ---
-        shifts = r.alignment_shift_px(:);
-        non_ref_idx = setdiff(1:numel(shifts), r.reference_session_index);
-        non_ref = shifts(non_ref_idx);
-        if ~isempty(non_ref) && max(abs(non_ref)) > thresh.max_translation_px
-            flags(k).W5a = 2;
-            [v, i] = max(abs(non_ref));
-            metrics(k).W5a_max_shift = v;
-            details = add_detail(details, id, session_name(r, non_ref_idx(i)), ...
-                'W5a_shift_hard', v, thresh.max_translation_px, 2);
+        % --- low_match ---
+        metrics(k).match_pct = 100 * match(k);
+        if comparable(k) && ~isnan(match_scale)
+            metrics(k).match_z = (match(k) - batch.match_median) / match_scale;
         end
-        if numel(non_ref) >= 3
-            [hit, i, b] = zscore_outlier(non_ref, z);
-            if hit
-                flags(k).W5b = 2;
-                details = add_detail(details, id, session_name(r, non_ref_idx(i)), ...
-                    'W5b_shift_outlier', non_ref(i), b, 2);
+        if r.match_stats(2) == 0
+            [flags(k), details] = fire(flags(k), details, id, '-', 'low_match', ...
+                'cells found in all sessions (needs at least 1)', 0, 1, 2);
+        elseif ~isnan(metrics(k).match_z)
+            [sev, b] = level(match(k), batch.match_yellow, batch.match_red, 'low');
+            if sev
+                [flags(k), details] = fire(flags(k), details, id, '-', 'low_match', ...
+                    'match % below the batch median', 100 * match(k), 100 * b, sev);
             end
-        end
-
-        % --- W6a/W6b: model MSE ---
-        if r.MSE_model > thresh.max_mse
-            flags(k).W6a = 2;
-            details = add_detail(details, id, '-', 'W6a_mse_hard', r.MSE_model, thresh.max_mse, 2);
-        end
-        % W6b: batch-distribution check (bad=HIGH), needs >=3
-        if ns >= 3
-            [flags(k).W6b, b] = batch_severity(mse_vec(succeeded), mse_vec(k), true, z);
-            if flags(k).W6b
-                details = add_detail(details, id, '-', 'W6b_mse_rel', r.MSE_model, b, flags(k).W6b);
-            end
-        end
-
-        % --- W7: session-count mismatch (binary red) ---
-        if isfield(thresh, 'expected_n_sessions') && numel(r.sessions) ~= thresh.expected_n_sessions
-            flags(k).W7 = 2;
-            details = add_detail(details, id, '-', 'W7_session_count', ...
-                numel(r.sessions), thresh.expected_n_sessions, 2);
         end
     end
 
@@ -170,71 +182,31 @@ function out = detect_anomalies(results, thresh)
         'dataset_ids', {dataset_ids}, ...
         'flags', flags, ...
         'metrics', metrics, ...
-        'details', details);
+        'details', details, ...
+        'batch', batch);
 end
 
 % =========================================================================
 % Local helpers
 % =========================================================================
 
-function [sev, bound] = batch_severity(values, this_value, bad_is_high, z_threshold)
-%BATCH_SEVERITY 2=red if |z|>z_threshold on bad side, 1=yellow if in worst
-%   batch quartile on bad side, else 0. NaN/Inf-safe; needs >=3 finite values.
-%   bound is the limit that was crossed (mean -+ z*SD for red, the quartile
-%   for yellow), NaN when sev is 0.
+function [sev, bound] = level(v, yellow, red, bad)
+%LEVEL 2 when v is past the red limit, 1 when past the yellow one, else 0.
+%   bad = 'low' or 'high' says which side is bad. bound is the crossed limit.
     sev = 0; bound = NaN;
-    v = values(:);
-    v = v(~isnan(v) & ~isinf(v));
-    if numel(v) < 3 || isnan(this_value) || isinf(this_value)
-        return
-    end
-    mu = mean(v);
-    sd = std(v);
-    if sd == 0 || isnan(sd)
-        return
-    end
-    if ~bad_is_high
-        % bad = LOW: larger positive z means worse (further below mean)
-        z = (mu - this_value) / sd;
-        q = quantile_safe(v, 0.25);   % worst quartile = strictly below Q1
-        in_worst_q = this_value < q;
-        red_bound = mu - z_threshold * sd;
+    if isnan(v); return; end
+    if strcmp(bad, 'low')
+        if v < red; sev = 2; bound = red; elseif v < yellow; sev = 1; bound = yellow; end
     else
-        % bad = HIGH
-        z = (this_value - mu) / sd;
-        q = quantile_safe(v, 0.75);   % worst quartile = strictly above Q3
-        in_worst_q = this_value > q;
-        red_bound = mu + z_threshold * sd;
-    end
-    if z > z_threshold
-        sev = 2; bound = red_bound;
-    elseif in_worst_q
-        sev = 1; bound = q;
+        if v > red; sev = 2; bound = red; elseif v > yellow; sev = 1; bound = yellow; end
     end
 end
 
-function q = quantile_safe(v, p)
-%QUANTILE_SAFE Compute quantile without requiring Statistics Toolbox.
-%   Uses sort + linear interpolation matching MATLAB's quantile convention.
-    v = sort(v(:));
-    n = numel(v);
-    % Positions: (0.5, 1.5, ..., n-0.5) / n
-    positions = ((1:n) - 0.5) / n;
-    q = interp1(positions, v, p, 'linear', 'extrap');
-end
-
-function [hit, i, bound] = zscore_outlier(v, z_threshold)
-%ZSCORE_OUTLIER Element of v with the largest |z|. hit when that |z| exceeds
-%   z_threshold; bound is mean +- z_threshold*SD on the side of that element.
-    hit = false; i = NaN; bound = NaN;
-    v = v(:);
-    mu = mean(v, 'omitnan');
-    sd = std(v, 0, 'omitnan');
-    if sd == 0 || isnan(sd); return; end
-    zv = (v - mu) / sd;
-    [m, i] = max(abs(zv));
-    hit = m > z_threshold;
-    bound = mu + sign(zv(i)) * z_threshold * sd;
+function [f, d] = fire(f, d, id, session, name, rule, value, threshold, severity)
+    f.(name) = max(f.(name), severity);
+    words = {'yellow', 'red'};
+    d(end+1) = struct('dataset_id', id, 'session', session, 'warning', name, ...
+        'rule', rule, 'value', value, 'threshold', threshold, 'severity', words{severity});
 end
 
 function idx = xcorr_session_index(r, i)
@@ -252,9 +224,4 @@ end
 
 function s = session_name(r, idx)
     if idx >= 1 && idx <= numel(r.sessions); s = r.sessions{idx}; else; s = '-'; end
-end
-
-function d = add_detail(d, id, session, type, value, threshold, severity)
-    d(end+1) = struct('dataset_id', id, 'session', session, 'anomaly_type', type, ...
-        'value', value, 'threshold', threshold, 'severity', severity);
 end

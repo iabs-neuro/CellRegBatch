@@ -4,6 +4,7 @@ end
 
 function setupOnce(testCase)
     here = fileparts(mfilename('fullpath'));
+    addpath(genpath(fullfile(here, '..', '..', 'BatchCellReg')));
     addpath(fullfile(here, 'fixtures'));
     testCase.TestData.flat_dir = make_fixtures();
 end
@@ -45,4 +46,14 @@ function test_duplicate_session_id_is_error(testCase)
     d = r.datasets(strcmp({r.datasets.dataset_id}, 'X_M01'));
     verifyTrue(testCase, d.skip);
     verifyMatches(testCase, d.skip_reason, 'duplicate');
+end
+
+function test_session_names_are_the_union_of_run_datasets(testCase)
+    % D05 is skipped (one session), so its sessions do not count.
+    r = scan_input_folder(testCase.TestData.flat_dir);
+    ids = {};
+    for d = r.datasets(~[r.datasets.skip])
+        ids = [ids, {d.sessions.session_id}]; %#ok<AGROW>
+    end
+    verifyEqual(testCase, r.session_names, unique(ids));
 end

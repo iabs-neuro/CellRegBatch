@@ -5,6 +5,8 @@ end
 function test_runs_on_shipped_cellreg_sample_data(testCase)
     % SampleData (5 sessions of one mouse from CellReg, 2.35 um/px as in
     % CellReg/demo.m) ships with the repository, so this test runs anywhere.
+    % DEMO_M02 is the same mouse without session 3D: it must be matched,
+    % flagged, and its cell map must keep a zero column for 3D.
     repo_root = fullfile(fileparts(mfilename('fullpath')), '..', '..');
     addpath(genpath(fullfile(repo_root, 'CellReg')));
     addpath(genpath(fullfile(repo_root, 'Helper')));
@@ -18,13 +20,17 @@ function test_runs_on_shipped_cellreg_sample_data(testCase)
         copyfile(fullfile(repo_root, 'SampleData', sprintf('spatial_footprints_%02d.mat', k)), ...
                  fullfile(in, sprintf('DEMO_M01_%dD.mat', k)));
     end
+    for k = [1 2 4 5]
+        copyfile(fullfile(repo_root, 'SampleData', sprintf('spatial_footprints_%02d.mat', k)), ...
+                 fullfile(in, sprintf('DEMO_M02_%dD.mat', k)));
+    end
 
     cfg = batch_default_config();
     cfg.cellreg.microns_per_pixel = 2.35;
     cfg.cellreg.use_parallel_processing = false;
     summary = batch_run(in, cfg);
 
-    verifyEqual(testCase, summary.n_succeeded, 1);
+    verifyEqual(testCase, summary.n_succeeded, 2);
     verifyEqual(testCase, summary.n_failed, 0);
     r = summary.results(1);
     verifyEqual(testCase, r.sessions, {'1D','2D','3D','4D','5D'});
@@ -44,11 +50,59 @@ function test_runs_on_shipped_cellreg_sample_data(testCase)
     verifyEqual(testCase, readmatrix(fullfile(summary.output_dir, 'DEMO_M01_cellmap.csv')), map);
 
     T = readtable(summary.match_stats_csv);
-    verifyEqual(testCase, height(T), 1);
-    verifyEqual(testCase, T.n_cells, size(map, 1));
-    verifyEqual(testCase, [T.in_5_sessions, T.in_4_sessions, T.in_3_sessions, ...
-        T.in_2_sessions, T.in_1_sessions], r.match_stats(2:end));
-    verifyEqual(testCase, T.in_5_sessions, sum(all(map > 0, 2)));
+    verifyEqual(testCase, height(T), 2);
+    verifyEqual(testCase, T.n_cells(1), size(map, 1));
+    verifyEqual(testCase, [T.in_5_sessions(1), T.in_4_sessions(1), T.in_3_sessions(1), ...
+        T.in_2_sessions(1), T.in_1_sessions(1)], r.match_stats(2:end));
+    verifyEqual(testCase, T.in_5_sessions(1), sum(all(map > 0, 2)));
+    % Percent with 3 decimals.
+    verifyEqual(testCase, T.pct_in_all(1), round(100 * r.match_stats(2) / r.match_stats(1), 3));
+    verifyEqual(testCase, summary.anomalies.flags(1).session_count, 0);
+
+    % --- DEMO_M02: session 3D missing ---
+    r2 = summary.results(2);
+    verifyEqual(testCase, r2.sessions, {'1D','2D','4D','5D'});
+    verifyEqual(testCase, r2.missing_sessions, {'3D'});
+    verifyEqual(testCase, summary.anomalies.flags(2).session_count, 2);
+    f2 = dir(fullfile(summary.output_dir, 'DEMO_M02', 'cellRegistered_*.mat'));
+    s2 = load(fullfile(f2(1).folder, f2(1).name));
+    map2 = s2.cell_registered_struct.cell_to_index_map;
+    verifySize(testCase, map2, [size(map2, 1) 4]);
+    full2 = readmatrix(fullfile(summary.output_dir, 'DEMO_M02_cellmap.csv'));
+    verifySize(testCase, full2, [size(map2, 1) 5]);
+    verifyEqual(testCase, full2(:, 3), zeros(size(map2, 1), 1));
+    verifyEqual(testCase, full2(:, [1 2 4 5]), map2);
+
+    % Summary files of the batch.
+    verifyEqual(testCase, exist(summary.warnings_png, 'file'), 2);
+    p = parse_batch_results_csv(summary.results_csv);
+    verifyTrue(testCase, p.ok, p.error);
+    verifyEqual(testCase, p.rows{2, strcmp(p.headers, 'missing_sessions')}, '3D');
+    verifyEqual(testCase, p.rows{2, strcmp(p.headers, 'session_count')}, '2');
+end
+
+function test_model_can_be_set_in_config(testCase)
+    repo_root = fullfile(fileparts(mfilename('fullpath')), '..', '..');
+    addpath(genpath(fullfile(repo_root, 'CellReg')));
+    addpath(genpath(fullfile(repo_root, 'Helper')));
+    addpath(genpath(fullfile(repo_root, 'BatchCellReg')));
+    in = fullfile(tempdir, ['BatchCellReg_model_' datestr(now,'HHMMSSFFF')]);
+    mkdir(in);
+    cleanup = onCleanup(@() rmdir(in, 's'));
+    for k = 1:2
+        copyfile(fullfile(repo_root, 'SampleData', sprintf('spatial_footprints_%02d.mat', k)), ...
+                 fullfile(in, sprintf('DEMO_M01_%dD.mat', k)));
+    end
+    cfg = batch_default_config();
+    cfg.cellreg.microns_per_pixel = 2.35;
+    cfg.cellreg.use_parallel_processing = false;
+    cfg.cellreg.expected_n_sessions = 2;
+    % The best fit on this data is spatial correlation; the setting must win.
+    cfg.cellreg.initial_registration_type = 'Centroid distance';
+    summary = batch_run(in, cfg);
+    verifyEqual(testCase, summary.n_succeeded, 1);
+    verifyEqual(testCase, summary.results(1).best_model_string, 'Centroid distance');
+    verifyMatches(testCase, fileread(summary.log_file), 'model Centroid distance set in config');
 end
 
 function test_explicit_empty_selection_runs_nothing(testCase)

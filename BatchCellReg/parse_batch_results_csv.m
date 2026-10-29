@@ -1,5 +1,12 @@
-function r = parse_batch_results_csv(path)
-%PARSE_BATCH_RESULTS_CSV Read & validate a _batch_results.csv export.
+function r = parse_batch_results_csv(path, required)
+%PARSE_BATCH_RESULTS_CSV Read & validate a CSV written by batch_run.
+%   required: column names the file must have. Default: the columns the
+%   GUI shows from _batch_results.csv.
+    if nargin < 2
+        [~, names] = anomaly_decode_map();
+        required = [{'dataset_id', 'n_sessions', 'n_cells', 'pct_in_all_of_mean', ...
+            'chosen_fpr_pct'}, names];
+    end
     r = struct('ok', false, 'error', '', 'headers', {{}}, 'rows', {{}});
     if exist(path, 'file') ~= 2
         r.error = sprintf('File not found: %s', path); return
@@ -17,8 +24,11 @@ function r = parse_batch_results_csv(path)
     if isempty(raw); r.error = 'Empty file'; return; end
     headers = strsplit(raw{1}, ',', 'CollapseDelimiters', false);
     headers = strtrim(headers);
-    required = {'dataset_id','n_sessions','n_cells','pct_in_all','chosen_fpr', ...
-        'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
+    if any(strcmp(headers, 'W1'))
+        r.error = ['This file was written by an older version (warnings W1-W7). ' ...
+            'Run the batch again to get the current warnings.'];
+        return
+    end
     for k = 1:numel(required)
         if ~any(strcmp(headers, required{k}))
             r.error = sprintf('Missing required column: %s', required{k}); return

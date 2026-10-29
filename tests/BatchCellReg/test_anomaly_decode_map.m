@@ -7,19 +7,20 @@ function setupOnce(~)
 end
 
 function test_has_all_codes(tc)
-    m = anomaly_decode_map();
-    codes = {'W1','W2','W2b_hard','W2b_rel','W3a','W3b','W4','W5a','W5b','W6a','W6b','W7'};
-    for k = 1:numel(codes)
-        verifyTrue(tc, isKey(m, codes{k}), sprintf('missing %s', codes{k}));
-        e = m(codes{k});
-        verifyTrue(tc, isfield(e,'short') && isfield(e,'desc'));
+    [m, order] = anomaly_decode_map();
+    verifyEqual(tc, order, {'session_count', 'few_cells', 'cell_drop', 'alignment', ...
+        'model_fit', 'low_match'});
+    verifyEqual(tc, sort(keys(m)), sort(order));
+    for k = 1:numel(order)
+        e = m(order{k});
         verifyNotEmpty(tc, e.short);
         verifyNotEmpty(tc, e.desc);
     end
 end
 
-function test_short_is_brief(tc)
-    m = anomaly_decode_map();
-    verifyEqual(tc, m('W3a').short, 'low xcorr');
-    verifyEqual(tc, m('W6a').short, 'bad MSE');
+function test_detector_uses_the_same_names(tc)
+    [~, order] = anomaly_decode_map();
+    cfg = batch_default_config();
+    a = detect_anomalies(struct([]), cfg.anomaly_thresholds);
+    verifyEqual(tc, fieldnames(a.flags)', order);
 end

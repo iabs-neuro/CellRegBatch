@@ -1,18 +1,26 @@
 function result = scan_input_folder(input_folder)
 %SCAN_INPUT_FOLDER Group .mat session files by (experiment, mouse).
 %
+%   File names: <EXP>_<MOUSE>_<SESSION>[_<n>T][_<anything>].mat, where EXP,
+%   MOUSE and SESSION are letters and digits only. An optional _<n>T part
+%   (trial) belongs to the session id; the rest is ignored.
+%
 %   result.datasets(k).dataset_id           '<EXP>_<MOUSE>'
 %   result.datasets(k).exp_id
 %   result.datasets(k).mouse_id
-%   result.datasets(k).sessions(j).session_id  '1D' / '1D_1T' / ...
+%   result.datasets(k).sessions(j).session_id  '1D' / '1D_1T' / 'day10' ...
 %   result.datasets(k).sessions(j).file_path
 %   result.datasets(k).skip                 logical
 %   result.datasets(k).skip_reason          string
-%   result.session_names                    sorted union of session_ids over
-%                                           the datasets that are not skipped
+%   result.experiment                       the experiment names of the
+%                                           folder joined by '+'; the batch
+%                                           output files start with it
 %   result.unparsed                         cellstr of filenames
+%
+%   Datasets and sessions are in natural order (natural_order): session 2D
+%   comes before 10D.
 
-    pattern = '^([A-Za-z0-9]+)_([A-Za-z]{1,2}\d{2})_(\dD|\dT)(_\dT)?.*\.mat$';
+    pattern = '^([A-Za-z0-9]+)_([A-Za-z0-9]+)_([A-Za-z0-9]+)(_\d+T)?(_.*)?\.mat$';
 
     listing = dir(fullfile(input_folder, '*.mat'));
     parsed = struct('exp', {}, 'mouse', {}, 'session_id', {}, ...
@@ -26,19 +34,17 @@ function result = scan_input_folder(input_folder)
             unparsed{end+1} = name; %#ok<AGROW>
             continue
         end
-        sid = tok{3};
-        if numel(tok) >= 4 && ~isempty(tok{4})
-            sid = [sid tok{4}]; %#ok<AGROW>
-        end
         parsed(end+1) = struct( ...
-            'exp', tok{1}, 'mouse', tok{2}, 'session_id', sid, ...
+            'exp', tok{1}, 'mouse', tok{2}, 'session_id', [tok{3} tok{4}], ...
             'file_path', fullfile(input_folder, name), 'name', name); %#ok<AGROW>
     end
 
-    % Sort all parsed entries alphabetically by filename (drives session order).
+    % Sort by experiment, mouse, session, then file name; char(1) sorts
+    % before any character of a name, so the parts compare one by one.
     if ~isempty(parsed)
-        [~, order] = sort({parsed.name});
-        parsed = parsed(order);
+        keys = arrayfun(@(p) strjoin({p.exp, p.mouse, p.session_id, p.name}, char(1)), ...
+            parsed, 'UniformOutput', false);
+        parsed = parsed(natural_order(keys));
     end
 
     % Group by (exp, mouse).
@@ -73,14 +79,8 @@ function result = scan_input_folder(input_folder)
         end
     end
 
-    % The union defines the columns of every cell map in the batch: a
-    % dataset without one of these sessions gets a column of zeros there.
-    session_names = {};
-    for k = find(~[datasets.skip])
-        session_names = [session_names, {datasets(k).sessions.session_id}]; %#ok<AGROW>
-    end
-    session_names = unique(session_names);
-
-    result = struct('datasets', datasets, 'session_names', {session_names}, ...
+    experiment = '';
+    if ~isempty(datasets); experiment = strjoin(unique({datasets.exp_id}), '+'); end
+    result = struct('datasets', datasets, 'experiment', experiment, ...
         'unparsed', {unparsed});
 end

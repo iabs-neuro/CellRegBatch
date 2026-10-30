@@ -5,9 +5,12 @@ function plot_batch_warnings(results, anomalies, thresh, png_path)
 %   behind the warnings, with the yellow and red limits as dashed lines,
 %   so the reader sees how far each dataset is from a limit.
 %   results, anomalies: as in batch_run. thresh: the thresholds passed to
-%   detect_anomalies.
+%   detect_anomalies. png_path: <EXP>_batch_warnings.png; the footer names
+%   the detail file next to it, <EXP>_batch_warnings_detail.csv.
 
     [info, names] = anomaly_decode_map();
+    [~, png_name] = fileparts(png_path);
+    detail_name = [regexprep(png_name, '_batch_warnings$', '') '_batch_warnings_detail.csv'];
     n = numel(results);
     row_px = 20;
     fig = figure('Visible', 'off', 'Color', 'w', 'Units', 'pixels', ...
@@ -44,7 +47,7 @@ function plot_batch_warnings(results, anomalies, thresh, png_path)
         'yellow = check, red = problem, dark grey = dataset failed. Dot plots: dashed ' ...
         'lines = yellow and red limits; dot colour = how the value compares with them. ' ...
         'Match % = cells in all sessions / mean cells per session; solid line = batch median. ' ...
-        'Details: _batch_warnings_detail.csv.']);
+        'Details: ' detail_name '.']);
 
     top = H - 115; plot_h = row_px * n;
     y0 = top - plot_h;

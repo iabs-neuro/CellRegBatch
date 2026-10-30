@@ -14,8 +14,11 @@ function summary = batch_run(input_folder, cfg, opts)
 %   columns), output_dir, log_file, results_csv, detail_csv, match_stats_csv,
 %   warnings_png, n_succeeded, n_failed, n_with_warnings, n_kept, stopped.
 %
+%   The output files of the batch start with the experiment name of the
+%   input folder (scan_input_folder): <EXP>_batch_results.csv and so on.
+%
 %   The tables, the figure and summary.results cover the whole output folder:
-%   datasets of earlier runs (stored in _batch_results.mat) stay in them while
+%   datasets of earlier runs (stored in <EXP>_batch_results.mat) stay in them while
 %   their folder exists. n_succeeded, n_failed and n_with_warnings count this
 %   run only; n_kept counts the datasets taken from earlier runs.
 
@@ -28,13 +31,14 @@ function summary = batch_run(input_folder, cfg, opts)
 
     output_dir = fullfile(input_folder, cfg.io.output_subfolder_name);
     if ~exist(output_dir, 'dir'); mkdir(output_dir); end
-    log_file = fullfile(output_dir, sprintf('_batch_log_%s.txt', datestr(now, 'yyyymmdd_HHMMSS')));
+    out_file = @(name) fullfile(output_dir, [scan.experiment '_' name]);
+    log_file = out_file(sprintf('batch_log_%s.txt', datestr(now, 'yyyymmdd_HHMMSS')));
     logger = batch_logger(log_file, opts.live_log_callback);
     cleanup = onCleanup(@() logger.close());
 
-    config_to_json(cfg, fullfile(output_dir, '_batch_config.json'));
-    logger.info('GLOBAL', 'input=%s, output=%s, datasets=%d, unparsed=%d', ...
-        input_folder, output_dir, numel(scan.datasets), numel(scan.unparsed));
+    config_to_json(cfg, out_file('batch_config.json'));
+    logger.info('GLOBAL', 'input=%s, output=%s, experiment=%s, datasets=%d, unparsed=%d', ...
+        input_folder, output_dir, scan.experiment, numel(scan.datasets), numel(scan.unparsed));
     expected = cfg.cellreg.expected_n_sessions;
     logger.info('GLOBAL', ['microns_per_pixel=%g, maximal_distance_um=%g, ' ...
         'expected_n_sessions=%d, model=%s, fpr_max=%g'], cfg.cellreg.microns_per_pixel, ...
@@ -42,8 +46,8 @@ function summary = batch_run(input_folder, cfg, opts)
         cfg.p_same_tuning.fpr_max);
     if ~isempty(scan.unparsed)
         shown = scan.unparsed(1:min(20, end));
-        logger.warn('GLOBAL', ['%d files do not match <EXPERIMENT>_<ANIMAL>_<SESSION>*.mat ' ...
-            '(ANIMAL = 1-2 letters + 2 digits, SESSION = digit + D or T) and are ignored: %s%s'], ...
+        logger.warn('GLOBAL', ['%d files do not match <EXPERIMENT>_<ANIMAL>_<SESSION>.mat ' ...
+            '(each part: letters and digits only, parts separated by _) and are ignored: %s%s'], ...
             numel(scan.unparsed), strjoin(shown, ', '), ...
             repmat(' ...', 1, numel(scan.unparsed) > numel(shown)));
     end
@@ -51,16 +55,16 @@ function summary = batch_run(input_folder, cfg, opts)
         logger.warn('GLOBAL', 'no dataset found: rename the files (manual, section 1.2)');
         warning('BatchCellReg:NoDatasets', ['No dataset found in %s: %d .mat files do ' ...
             'not match the naming rule (manual, section 1.2).'], input_folder, numel(scan.unparsed));
-    else
-        logger.info('GLOBAL', 'cell map columns (sessions of the batch): %s', ...
-            strjoin(scan.session_names, ', '));
-        write_lines(scan.session_names, fullfile(output_dir, '_cellmap_columns.txt'));
     end
-    if ~isempty(scan.datasets) && numel(scan.session_names) ~= expected
-        logger.warn('GLOBAL', ['the batch has %d session names, expected %d: ' ...
-            'check the file names'], numel(scan.session_names), expected);
+    [checks, session_names] = check_session_counts(scan, expected);
+    if ~isempty(session_names)
+        logger.info('GLOBAL', 'cell map columns: %s', strjoin(session_names, ', '));
+        write_lines(session_names, out_file('cellmap_columns.txt'));
+    elseif ~isempty(scan.datasets)
+        logger.warn('GLOBAL', ['cell map columns not known: no dataset has %d sessions ' ...
+            '(check expected_n_sessions)'], expected);
     end
-    for c = check_session_counts(scan, expected)
+    for c = checks
         if ~c.ok
             logger.warn(c.dataset_id, 'session count: %s (will be matched and flagged red)', c.text);
         end
@@ -87,7 +91,7 @@ function summary = batch_run(input_folder, cfg, opts)
         sub = fullfile(output_dir, d.dataset_id);
         if ~exist(sub, 'dir'); mkdir(sub); end
         try
-            r = run_single_dataset(d, cfg, sub, logger, scan.session_names);
+            r = run_single_dataset(d, cfg, sub, logger, session_names);
             logger.info(d.dataset_id, 'done (%d cells; in %s sessions: %s)', ...
                 r.match_stats(1), ...
                 strjoin(arrayfun(@num2str, numel(r.sessions):-1:1, 'UniformOutput', false), '/'), ...
@@ -105,7 +109,7 @@ function summary = batch_run(input_folder, cfg, opts)
 
     run_ids = {};
     if ~isempty(results); run_ids = {results.dataset_id}; end
-    store = fullfile(output_dir, '_batch_results.mat');
+    store = out_file('batch_results.mat');
     [results, origin, kept] = merge_previous_results(results, store, output_dir, ...
         registration_settings(cfg), logger);
     try
@@ -121,10 +125,12 @@ function summary = batch_run(input_folder, cfg, opts)
     at.alignment_min_xcorr = cfg.cellreg.alignment_min_xcorr;
     anomalies = detect_anomalies(results, at);
 
-    [results_csv, detail_csv] = export_results(results, anomalies, output_dir);
-    match_stats_csv = fullfile(output_dir, '_match_statistics.csv');
+    results_csv = out_file('batch_results.csv');
+    detail_csv = out_file('batch_warnings_detail.csv');
+    export_results(results, anomalies, results_csv, detail_csv);
+    match_stats_csv = out_file('match_statistics.csv');
     write_cell_csv(match_statistics_table(results), match_stats_csv);
-    warnings_png = fullfile(output_dir, '_batch_warnings.png');
+    warnings_png = out_file('batch_warnings.png');
     try
         plot_batch_warnings(results, anomalies, at, warnings_png);
     catch ME
@@ -148,7 +154,7 @@ function summary = batch_run(input_folder, cfg, opts)
     summary = struct( ...
         'results', results, ...
         'anomalies', anomalies, ...
-        'session_names', {scan.session_names}, ...
+        'session_names', {session_names}, ...
         'output_dir', output_dir, ...
         'log_file', log_file, ...
         'results_csv', results_csv, ...
@@ -249,10 +255,7 @@ function write_lines(lines, path)
     fclose(fid);
 end
 
-function [results_csv, detail_csv] = export_results(results, anomalies, output_dir)
-    results_csv = fullfile(output_dir, '_batch_results.csv');
-    detail_csv  = fullfile(output_dir, '_batch_warnings_detail.csv');
-
+function export_results(results, anomalies, results_csv, detail_csv)
     [~, names] = anomaly_decode_map();
     rows = [{'dataset_id', 'n_sessions', 'missing_sessions', 'n_cells', ...
         'pct_in_all', 'pct_in_all_of_mean', 'chosen_p_same', 'chosen_fpr_pct', ...

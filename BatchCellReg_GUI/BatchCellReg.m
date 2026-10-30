@@ -146,7 +146,7 @@ function update_session_check(fig)
     app = getappdata(fig, 'app');
     if isempty(app.scan) || isempty(app.scan.datasets); return; end
     expected = app.config.cellreg.expected_n_sessions;
-    checks = check_session_counts(app.scan, expected);
+    [checks, columns] = check_session_counts(app.scan, expected);
     tbl = app.ui.datasets_table;
     rows = tbl.Data;
     for k = 1:numel(checks); rows{k, 5} = checks(k).text; end
@@ -160,13 +160,14 @@ function update_session_check(fig)
     catch
         % uistyle needs R2019b; the Check text still says what is wrong.
     end
-    names = strjoin(app.scan.session_names, ', ');
+    names = strjoin(columns, ', ');
+    if isempty(names); names = sprintf('not known (no dataset has %d sessions)', expected); end
     n_run = sum(~[app.scan.datasets.skip]);
     if isempty(bad)
-        txt = sprintf('Sessions in this folder: %s. All %d datasets have %d sessions.', ...
+        txt = sprintf('Cell map columns: %s. All %d datasets have %d sessions.', ...
             names, n_run, expected);
     else
-        txt = sprintf(['Sessions in this folder: %s. %d of %d datasets do not have %d ' ...
+        txt = sprintf(['Cell map columns: %s. %d of %d datasets do not have %d ' ...
             'sessions: they will be matched and get a red Sessions warning.'], ...
             names, numel(bad), n_run, expected);
     end
@@ -487,17 +488,19 @@ function on_export(fig, which)
         uialert(fig, 'No run or loaded results yet.', 'Export'); return;
     end
     if strcmp(which, 'results')
-        [n, p] = uiputfile('*.csv', 'Save results', '_batch_results.csv');
+        if has_run; src = app.last_summary.results_csv; else; src = app.loaded_csv_path; end
+        [~, nm, ext] = fileparts(src);
+        [n, p] = uiputfile('*.csv', 'Save results', [nm ext]);
         refocus(fig);
         if isnumeric(n); return; end
-        if has_run; src = app.last_summary.results_csv; else; src = app.loaded_csv_path; end
         copyfile(src, fullfile(p, n));
     else
         if ~has_run
             uialert(fig, 'Log export needs a live run (not a loaded CSV).', 'Export');
             return
         end
-        [n, p] = uiputfile('*.txt', 'Save log', '_batch_log.txt');
+        [~, nm, ext] = fileparts(app.last_summary.log_file);
+        [n, p] = uiputfile('*.txt', 'Save log', [nm ext]);
         refocus(fig);
         if isnumeric(n); return; end
         copyfile(app.last_summary.log_file, fullfile(p, n));
@@ -572,7 +575,8 @@ function apply_severity_styles(tbl, rows, wcols, errors)
 end
 
 function on_load_results(fig)
-    [name, path] = uigetfile('*.csv', 'Load _batch_results.csv');
+    [name, path] = uigetfile({'*_batch_results.csv', 'Batch results'; '*.csv', 'All CSV files'}, ...
+        'Load <EXPERIMENT>_batch_results.csv');
     refocus(fig);
     if isnumeric(name); return; end
     full = fullfile(path, name);
@@ -607,11 +611,13 @@ function fill_results_from_csv(fig, r, full)
     ecol = find(strcmp(r.headers, 'error'), 1);
     if ~isempty(ecol); errors = r.rows(:, ecol)'; end
 
-    % The detail file and the figure sit next to the results file.
-    folder = fileparts(full);
-    app.last_details = read_details(fullfile(folder, '_batch_warnings_detail.csv'));
+    % The detail file and the figure sit next to the results file and have
+    % the same <EXPERIMENT> start of the name.
+    [folder, nm] = fileparts(full);
+    base = fullfile(folder, regexprep(nm, '_batch_results$', ''));
+    app.last_details = read_details([base '_batch_warnings_detail.csv']);
     app.last_errors = errors;
-    app.figure_path = fullfile(folder, '_batch_warnings.png');
+    app.figure_path = [base '_batch_warnings.png'];
     app.ui.results_table.Data = rows;
     apply_severity_styles(app.ui.results_table, rows, 6:numel(want), errors);
     app.loaded_csv_path = full;

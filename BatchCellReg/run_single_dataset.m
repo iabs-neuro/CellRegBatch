@@ -5,8 +5,12 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger, session_n
 %   cfg:     full batch config struct (see batch_default_config).
 %   out_subdir: directory to write outputs into (created if missing).
 %   logger: batch_logger handle.
-%   session_names (optional): session ids of the whole batch. They set the
-%     columns of <dataset>_cellmap.csv; default: this dataset's sessions.
+%   session_names (optional): column names of the batch cell maps (second
+%     output of check_session_counts). A dataset with fewer sessions than
+%     expected gets zero columns in <dataset>_cellmap.csv (place_sessions).
+%
+%   Output names carry the dataset id: cellRegistered_<id>_<time>.mat,
+%   logFile_<id>_<time>.txt, Figures/<id>_<CellReg figure name>.
 
     % Vendor plot_* functions save but never close their figures; with hidden
     % figures holding full-FOV images, RAM grows dataset by dataset until the
@@ -14,18 +18,27 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger, session_n
     figs_before = findall(groot, 'Type', 'figure');
     close_figs = onCleanup(@() delete(setdiff(findall(groot, 'Type', 'figure'), figs_before)));
 
+    tag = dataset.dataset_id;
     figures_dir = fullfile(out_subdir, 'Figures');
     if ~exist(figures_dir, 'dir'); mkdir(figures_dir); end
+    name_figures = onCleanup(@() prefix_figure_names(figures_dir, tag));
     fig_vis = cfg.cellreg.figures_visibility;
 
-    tag = dataset.dataset_id;
     sessions = {dataset.sessions.session_id};
-    if nargin < 5 || isempty(session_names); session_names = sessions; end
-    missing_sessions = setdiff(session_names, sessions);
+    if nargin < 5; session_names = {}; end
+    expected = cfg.cellreg.expected_n_sessions;
+    place = place_sessions(sessions, session_names, expected);
+    missing_sessions = place.missing;
     logger.info(tag, 'sessions: %s', strjoin(sessions, ', '));
     if ~isempty(missing_sessions)
         logger.warn(tag, 'no session %s: its cell map column will be zeros', ...
             strjoin(missing_sessions, ', '));
+    elseif ~place.known
+        cols = strjoin(session_names, ', ');
+        if isempty(cols); cols = 'not known'; end
+        logger.warn(tag, ['%d of %d sessions, and their names do not match the ' ...
+            'cell map columns (%s): the last %d columns of the cell map will be zeros'], ...
+            numel(sessions), expected, cols, place.n_columns - numel(sessions));
     end
 
     file_paths = {dataset.sessions.file_path};
@@ -349,13 +362,14 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger, session_n
         for oi = 1:numel(stale)
             delete(fullfile(out_subdir, stale(oi).name));
         end
-        save(fullfile(out_subdir, ['cellRegistered_' stamp '.mat']), 'cell_registered_struct', '-v7.3');
+        save(fullfile(out_subdir, ['cellRegistered_' tag '_' stamp '.mat']), ...
+            'cell_registered_struct', '-v7.3');
         % Plain-CSV copy of the cell map for tools outside MATLAB: rows =
         % registered cells, columns = the batch's sessions, value = cell
         % index in that session's input file, 0 = not found. A missing
         % session is a column of zeros, so all maps of a batch line up.
         % Kept next to the dataset folders: one folder holds the whole batch.
-        writematrix(expand_cell_map(opt_map, sessions, session_names), ...
+        writematrix(expand_cell_map(opt_map, place.columns, place.n_columns), ...
             fullfile(fileparts(out_subdir), [dataset.dataset_id '_cellmap.csv']));
         if strcmp(best_model, 'Spatial correlation')
             save_log_file(out_subdir, file_paths, microns_per_pixel, ax, ay, ...
@@ -367,6 +381,14 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger, session_n
                 alignment_type, ref_idx, max_dist, n_bins, best_model, init_thresh, ...
                 'Probabilistic', best_model, p_same_thr, opt_map, cell_registered_struct, '', ...
                 unc_cd, fpr_cd, tpr_cd, MSE_cd);
+        end
+        % CellReg names it logFile_<time>.txt. The id goes after "logFile_",
+        % so scripts that look for logFile_*.txt still find it.
+        for f = dir(fullfile(out_subdir, 'logFile_*.txt'))'
+            if ~startsWith(f.name, ['logFile_' tag '_'])
+                movefile(fullfile(out_subdir, f.name), ...
+                    fullfile(out_subdir, ['logFile_' tag '_' f.name(9:end)]));
+            end
         end
     end
 
@@ -396,6 +418,23 @@ function result = run_single_dataset(dataset, cfg, out_subdir, logger, session_n
     result.alignment_mode = won_label;
     result.forced_low_xcorr = forced_low_xcorr;
     result.error = '';
+end
+
+function prefix_figure_names(figures_dir, tag)
+%PREFIX_FIGURE_NAMES Put the dataset id in front of the names CellReg gives
+%   its figures, so that a figure copied out of the folder still says which
+%   dataset it shows. Runs on success and on error (onCleanup); a file that
+%   cannot be renamed keeps its name, a figure is never worth an error here.
+    files = dir(figures_dir);
+    for f = files(~[files.isdir])'
+        if startsWith(f.name, [tag '_']); continue; end
+        target = fullfile(figures_dir, [tag '_' f.name]);
+        try
+            if exist(target, 'file') == 2; delete(target); end
+            movefile(fullfile(figures_dir, f.name), target);
+        catch
+        end
+    end
 end
 
 function safe_plot(logger, tag, name, fn)

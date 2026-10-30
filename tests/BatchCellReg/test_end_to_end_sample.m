@@ -5,8 +5,9 @@ end
 function test_runs_on_shipped_cellreg_sample_data(testCase)
     % SampleData (5 sessions of one mouse from CellReg, 2.35 um/px as in
     % CellReg/demo.m) ships with the repository, so this test runs anywhere.
-    % DEMO_M02 is the same mouse without session 3D: it must be matched,
-    % flagged, and its cell map must keep a zero column for 3D.
+    % DEMO_M02 is the same mouse without session 3D, and its sessions are
+    % named 1D_1T.. as some HOS mice: it must be matched, flagged, and its
+    % cell map must keep a zero column for 3D.
     repo_root = fullfile(fileparts(mfilename('fullpath')), '..', '..');
     addpath(genpath(fullfile(repo_root, 'CellReg')));
     addpath(genpath(fullfile(repo_root, 'Helper')));
@@ -22,7 +23,7 @@ function test_runs_on_shipped_cellreg_sample_data(testCase)
     end
     for k = [1 2 4 5]
         copyfile(fullfile(repo_root, 'SampleData', sprintf('spatial_footprints_%02d.mat', k)), ...
-                 fullfile(in, sprintf('DEMO_M02_%dD.mat', k)));
+                 fullfile(in, sprintf('DEMO_M02_%dD_1T.mat', k)));
     end
 
     cfg = batch_default_config();
@@ -39,8 +40,23 @@ function test_runs_on_shipped_cellreg_sample_data(testCase)
     out = fullfile(summary.output_dir, 'DEMO_M01');
     f = dir(fullfile(out, 'cellRegistered_*.mat'));
     verifyNumElements(testCase, f, 1);
-    verifyNumElements(testCase, dir(fullfile(out, 'logFile_*.txt')), 1);
-    verifyNotEmpty(testCase, dir(fullfile(out, 'Figures', '*.png')));
+    verifyMatches(testCase, f(1).name, '^cellRegistered_DEMO_M01_\d{8}_\d{6}\.mat$');
+    lf = dir(fullfile(out, 'logFile_*.txt'));
+    verifyNumElements(testCase, lf, 1);
+    verifyMatches(testCase, lf(1).name, '^logFile_DEMO_M01_\d{8}_\d{6}\.txt$');
+    figs = dir(fullfile(out, 'Figures', '*.png'));
+    verifyNotEmpty(testCase, figs);
+    verifyTrue(testCase, all(startsWith({figs.name}, 'DEMO_M01_')), strjoin({figs.name}, ', '));
+
+    % Batch files start with the experiment name.
+    for p = {summary.results_csv, summary.detail_csv, summary.match_stats_csv, ...
+             summary.warnings_png, summary.log_file}
+        [~, nm] = fileparts(p{1});
+        verifyTrue(testCase, startsWith(nm, 'DEMO_batch_') || startsWith(nm, 'DEMO_match_'), nm);
+    end
+    verifyEqual(testCase, summary.session_names, {'1D','2D','3D','4D','5D'});
+    verifyEqual(testCase, strtrim(fileread(fullfile(summary.output_dir, ...
+        'DEMO_cellmap_columns.txt'))), sprintf('1D\n2D\n3D\n4D\n5D'));
 
     % Same variable name as the CellReg GUI, so scripts written for GUI
     % output read the batch output unchanged.
@@ -62,7 +78,7 @@ function test_runs_on_shipped_cellreg_sample_data(testCase)
 
     % --- DEMO_M02: session 3D missing ---
     r2 = summary.results(2);
-    verifyEqual(testCase, r2.sessions, {'1D','2D','4D','5D'});
+    verifyEqual(testCase, r2.sessions, {'1D_1T','2D_1T','4D_1T','5D_1T'});
     verifyEqual(testCase, r2.missing_sessions, {'3D'});
     verifyEqual(testCase, summary.anomalies.flags(2).session_count, 2);
     f2 = dir(fullfile(summary.output_dir, 'DEMO_M02', 'cellRegistered_*.mat'));
@@ -116,10 +132,11 @@ function test_tables_keep_datasets_of_earlier_runs(testCase)
         'n_cells_per_session', [100 110], 'match_stats', [150 60 90], 'error', '');
     results = [old('OLD_M01'), old('GONE_M02')];   %#ok<NASGU>
     origin = struct('dataset_id', {'OLD_M01', 'GONE_M02'}, 'settings', {'other', 'other'}); %#ok<NASGU>
-    save(fullfile(out, '_batch_results.mat'), 'results', 'origin');
+    save(fullfile(out, 'NEW_batch_results.mat'), 'results', 'origin');
 
     cfg = batch_default_config();
     cfg.cellreg.use_parallel_processing = false;
+    cfg.cellreg.expected_n_sessions = 2;
     summary = batch_run(in, cfg, struct('selected_datasets', {{}}, 'live_log_callback', []));
     verifyEqual(testCase, summary.n_succeeded + summary.n_failed, 0);
     verifyEqual(testCase, summary.n_kept, 1);
@@ -129,9 +146,9 @@ function test_tables_keep_datasets_of_earlier_runs(testCase)
     log = fileread(summary.log_file);
     verifyMatches(testCase, log, '1 datasets from earlier runs: OLD_M01');
     verifyMatches(testCase, log, 'registered with other settings: OLD_M01');
-    s = load(fullfile(out, '_batch_results.mat'));
+    s = load(fullfile(out, 'NEW_batch_results.mat'));
     verifyEqual(testCase, {s.results.dataset_id}, {'OLD_M01'});
-    verifyEqual(testCase, strtrim(fileread(fullfile(out, '_cellmap_columns.txt'))), sprintf('1D\n2D'));
+    verifyEqual(testCase, strtrim(fileread(fullfile(out, 'NEW_cellmap_columns.txt'))), sprintf('1D\n2D'));
 end
 
 function test_model_can_be_set_in_config(testCase)

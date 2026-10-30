@@ -85,24 +85,31 @@ The batch finds the experiment, the animal and the session in the file name.
 The name must match this regular expression:
 
 ```
-^([A-Za-z0-9]+)_([A-Za-z]{1,2}\d{2})_(\dD|\dT)(_\dT)?.*\.mat$
+^([A-Za-z0-9]+)_([A-Za-z0-9]+)_([A-Za-z0-9]+)(_\d+T)?(_.*)?\.mat$
 ```
 
 | Part | Rule | Examples |
 |---|---|---|
-| Experiment | Letters and digits. No underscore. | `CC`, `HOS`, `BOWL2` |
-| Animal | 1 or 2 letters, then exactly 2 digits. | `H02`, `F54`, `JA07` |
-| Session | 1 digit, then `D` (day) or `T` (trial). An optional second part `_<digit>T` follows. | `1D`, `5D`, `2T`, `1D_2T` |
-| Rest | Any text before `.mat`. The batch ignores it. | `_filters`, `_converted` |
+| Experiment | Letters and digits, any number of them. | `CC`, `HOS`, `BOWL2` |
+| Animal | Letters and digits, any number of them. | `H02`, `F54`, `M1`, `mouse12` |
+| Session | Letters and digits, any number of them. An optional trial part `_<number>T` follows. | `1D`, `10D`, `day3`, `1D_2T` |
+| Rest | `_` and any text before `.mat`. The batch ignores it. | `_filters`, `_converted` |
+
+The character `_` separates the parts, so a part cannot contain it. Use only
+Latin letters.
 
 | File name | Result |
 |---|---|
 | `CC_H02_1D.mat` | dataset `CC_H02`, session `1D` |
 | `CC_H02_3D_filters.mat` | dataset `CC_H02`, session `3D` |
 | `NOF_F07_1D_2T_cnmf.mat` | dataset `NOF_F07`, session `1D_2T` |
-| `CC_H2_1D.mat` | not parsed: the animal needs 2 digits |
-| `CC_H02_10D.mat` | not parsed: the session has 1 digit only |
+| `CA1_mouse12_day10.mat` | dataset `CA1_mouse12`, session `day10` |
+| `mouse3_day1.mat` | not parsed: only 2 parts |
 | `CC-H02-1D.mat` | not parsed: the separators must be `_` |
+
+If your files have other names, rename them. For example, rename
+`mouse3_day1.mat` to `CA1_mouse3_day1.mat`. The batch has no setting for
+other name patterns.
 
 The batch reads only the files in the input folder itself, not in its
 subfolders. It ignores files whose names do not match. The GUI shows how many
@@ -110,9 +117,10 @@ files it ignored (**Unparsed files**).
 
 ### 1.3 Session order and the reference session
 
-The batch sorts the files of a dataset by the full file name, in alphabetical
-order. This order is the session order. Session 1 is the first file. For
-example: `1D` < `1D_2T` < `1T` < `2D`.
+The batch sorts the sessions of a dataset by session name. Numbers in a
+name compare by value, so `2D` comes before `10D`. Other characters compare
+in alphabetical order, capitals first. This order is the session order.
+Session 1 is the first. For example: `1D` < `1D_2T` < `1T` < `2D` < `10D`.
 
 The reference session is session number `reference_session_index` in this
 order (default 1, the first session).
@@ -134,15 +142,31 @@ Set `expected_n_sessions` to the number of sessions of your experiment. A
 dataset with another number of sessions is **not** skipped. The batch matches
 the sessions that it has and gives it a red `session_count` warning.
 
-The session names of the batch are all session names found in the folder
-(datasets that are skipped do not count). They set the columns of every cell
-map (5.6). For example, the batch has `1D`–`5D` and mouse `F07` has no `3D`.
-The cell map of `F07` then has 5 columns, and column 3 is all zeros. All cell
-maps of the batch have the same columns.
+Every cell map of the batch has `expected_n_sessions` columns (5.6). A
+dataset with fewer sessions gets a column of zeros for each missing session.
+The batch finds the place of a missing session by the session names:
 
-The batch writes the session names to the log (`cell map columns`). If their
-number is not `expected_n_sessions`, the log has a `WARN` line: check the file
-names.
+1. The column names are the most common list of session names among the
+   datasets with `expected_n_sessions` sessions. If no dataset has this number, the
+   column names are all session names of the folder, but only if there are
+   exactly `expected_n_sessions` of them.
+2. Each session of the short dataset goes to the column with the same name.
+   If a name is not found, the batch compares the names without the trial
+   part: session `1D_1T` goes to column `1D`.
+3. If a session still has no column, the zero columns are the last ones. The
+   log has a `WARN` line, and **Check** says `cannot tell which is missing`.
+
+For example, most mice have the sessions `1D`–`5D`, and mouse `F07` has
+`1D_1T`, `2D_1T`, `4D_1T` and `5D_1T`. The cell map of `F07` then has 5
+columns, and column 3 is all zeros.
+
+A dataset with `expected_n_sessions` sessions keeps its sessions as the
+columns, also if their names differ from the column names (`1D_1T` instead
+of `1D`). A dataset with more sessions has one column for each session.
+
+The batch writes the column names to `<EXP>_cellmap_columns.txt` and to the log
+(`cell map columns`). If they are not known, the log has a `WARN` line: check
+`expected_n_sessions`.
 
 ---
 
@@ -168,7 +192,7 @@ path for the current session. It does not save the path.
 | Input folder, **Browse...** | Select the folder with the session files. The output folder is shown below it. |
 | **Scan** | Read the folder and fill the table. |
 | **Expected sessions per mouse** | Number of sessions of your experiment (`expected_n_sessions`, 1.5). The value goes into the config. |
-| Session line | The session names of the folder and how many datasets do not have the expected number. Red text: some datasets differ. |
+| Session line | The cell map columns (1.5) and how many datasets do not have the expected number of sessions. Red text: some datasets differ. |
 | Table | One row per dataset: **Run** (check box), dataset name, number of sessions, session list in session order, **Check**. **Check** is `OK` or says what is wrong, for example `4 of 5: no 3D`. A red **Check** cell: the dataset will run and get a red `session_count` warning. |
 | Unparsed files | Number of `.mat` files with names that do not match the rule in 1.2. |
 | **?** | Explains the field next to it. Each tab has these buttons. |
@@ -202,14 +226,14 @@ approach (4.4).
 |---|---|
 | **Run batch** | Run all datasets that have **Run** set. MATLAB is busy until the batch ends. |
 | **Stop** | Stop the batch before the next dataset starts. The current dataset finishes first. |
-| **Load results CSV...** | Show a saved `_batch_results.csv` in the table. Use it to look at an earlier batch again. The GUI also reads `_batch_warnings_detail.csv` and finds `_batch_warnings.png` in the same folder. |
+| **Load results CSV...** | Show a saved `<EXP>_batch_results.csv` in the table. Use it to look at an earlier batch again. The GUI also reads `<EXP>_batch_warnings_detail.csv` and finds `<EXP>_batch_warnings.png` in the same folder. |
 | Log area | The batch log, live. It keeps the last 500 lines. The full log is in the output folder. |
 | Results table | One row per processed dataset: name, number of sessions, number of registered cells, **Match %** (cells in all sessions ÷ mean cells per session, in percent), **FPR %**, then the six warnings (section 6). Red cell = red warning, yellow cell = yellow warning. A grey row is a dataset that failed. |
 | Decode area | Click a cell of the table. The area shows the warning, each rule that fired, the value and the limit. For a failed dataset it shows the error. |
-| **Export results CSV** | Save a copy of `_batch_results.csv`. |
+| **Export results CSV** | Save a copy of `<EXP>_batch_results.csv`. |
 | **Export log TXT** | Save a copy of the batch log. It works after a run, not after **Load results CSV**. |
 | **Open output folder** | Open the output folder in the file explorer. |
-| **Warnings figure** | Open `_batch_warnings.png` (5.4). |
+| **Warnings figure** | Open `<EXP>_batch_warnings.png` (5.4). |
 
 ### 2.2 Script
 
@@ -226,8 +250,8 @@ cfg.cellreg.expected_n_sessions = 4;      % set this for your experiment
 % Check the folder first (the Scan of the GUI):
 scan = scan_input_folder('D:\data\5_Filters');
 disp(scan.unparsed)                       % files whose names do not match 1.2
-disp(scan.session_names)                  % the cell map columns (1.5)
-c = check_session_counts(scan, cfg.cellreg.expected_n_sessions);
+[c, columns] = check_session_counts(scan, cfg.cellreg.expected_n_sessions);
+disp(columns)                             % the cell map columns (1.5)
 disp([{c.dataset_id}' {c.text}'])         % the Check column of the GUI
 
 summary = batch_run('D:\data\5_Filters', cfg);
@@ -239,7 +263,7 @@ summary = batch_run('D:\data\5_Filters', cfg, opts);
 
 `batch_run` prints the batch log to the command window. CellReg itself also
 prints progress bars there. The same log, without the progress bars, is in the
-`_batch_log_*.txt` file. `scan_input_folder` and `check_session_counts` are
+`<EXP>_batch_log_*.txt` file. `scan_input_folder` and `check_session_counts` are
 part of the scripting interface.
 
 `batch_run(input_folder, cfg, opts)` uses the `input_folder` argument. It
@@ -254,7 +278,7 @@ does not read `cfg.io.input_folder`.
 | `summary` field | Meaning |
 |---|---|
 | `results` | Struct array, one element per processed dataset (see 4.8). |
-| `session_names` | The session names of the batch: the columns of every cell map (1.5). |
+| `session_names` | The names of the cell map columns (1.5). Empty if they are not known. |
 | `anomalies` | `.flags` (six warnings per dataset: 0 = none, 1 = yellow, 2 = red), `.metrics` (the values behind them), `.details` (one element per fired rule, the rows of 5.2), `.batch` (median and limits of the match comparison). |
 | `output_dir`, `log_file`, `results_csv`, `detail_csv`, `match_stats_csv`, `warnings_png` | Paths of the output folder and files. `warnings_png` is empty if the figure failed. |
 | `n_succeeded`, `n_failed`, `n_with_warnings` | Counts for this run. A dataset counts as "with warnings" if any warning is yellow or red. |
@@ -267,7 +291,7 @@ does not read `cfg.io.input_folder`.
 
 The config is a MATLAB struct. `batch_default_config.m` sets the defaults.
 `config_to_json` and `config_from_json` save and load it as JSON. Each run
-saves the config it used as `_batch_config.json` in the output folder.
+saves the config it used as `<EXP>_batch_config.json` in the output folder.
 
 To change a parameter that the GUI does not show:
 
@@ -413,7 +437,7 @@ value without the final rounding to 0.01 (column `chosen_fpr_pct`, in
 percent).
 
 The threshold is a bin centre of CellReg's P_same grid, for example 0.5005
-for 0.5. CellReg's `logFile_*.txt`, the batch log and `_batch_results.csv`
+for 0.5. CellReg's `logFile_*.txt`, the batch log and `<EXP>_batch_results.csv`
 show it rounded to 2 decimals, as CellReg does. In your methods, write the
 rounded value (for example "P_same threshold 0.5").
 
@@ -438,7 +462,7 @@ When `write_to_file` is on, the batch first deletes old `cellRegistered_*.mat`
 and `logFile_*.txt` files in the dataset folder. Then it writes new ones. Each
 dataset folder holds one result. The batch also writes the cell map of the
 dataset as `<dataset>_cellmap.csv` in the output folder (5.6). The cell map
-has one column for each session name of the batch (1.5).
+has `expected_n_sessions` columns (1.5).
 
 The result that the batch keeps for the warnings has these fields:
 `dataset_id`, `sessions`, `missing_sessions`, `n_cells_per_session`, `match_stats`,
@@ -459,28 +483,35 @@ hidden figures fill the memory during a long batch.
 ```
 <input folder>/
 └── Matching/                                  (io.output_subfolder_name)
-    ├── _batch_config.json                     config of the last run
-    ├── _batch_log_YYYYMMDD_HHMMSS.txt         one log per run
-    ├── _batch_results.csv                     one row per processed dataset
-    ├── _batch_warnings_detail.csv             one row per fired warning rule
-    ├── _match_statistics.csv                  cells found in k sessions, per dataset
-    ├── _batch_warnings.png                    picture of all warnings
-    ├── _batch_results.mat                     results of all runs, for the next run
-    ├── _cellmap_columns.txt                   session names = cell map columns
+    ├── <EXP>_batch_config.json                config of the last run
+    ├── <EXP>_batch_log_YYYYMMDD_HHMMSS.txt    one log per run
+    ├── <EXP>_batch_results.csv                one row per processed dataset
+    ├── <EXP>_batch_warnings_detail.csv        one row per fired warning rule
+    ├── <EXP>_match_statistics.csv             cells found in k sessions, per dataset
+    ├── <EXP>_batch_warnings.png               picture of all warnings
+    ├── <EXP>_batch_results.mat                results of all runs, for the next run
+    ├── <EXP>_cellmap_columns.txt              names of the cell map columns
     ├── <dataset>_cellmap.csv                  cell map of each dataset
     └── <dataset>/                             for example CC_H02/
-        ├── cellRegistered_YYYYMMDD_HHMMSS.mat
-        ├── logFile_YYYYMMDD_HHMMSS.txt
+        ├── cellRegistered_<dataset>_YYYYMMDD_HHMMSS.mat
+        ├── logFile_<dataset>_YYYYMMDD_HHMMSS.txt
         └── Figures/                           CellReg figures, .fig and .png
 ```
 
-Each run overwrites `_batch_config.json`, `_batch_results.csv`,
-`_batch_warnings_detail.csv`, `_match_statistics.csv` and
-`_batch_warnings.png`.
+`<EXP>` is the experiment name, for example `CC`. If the input folder has
+files of more than one experiment, `<EXP>` is their names joined by `+`, for
+example `CC+RFC`. `<dataset>` is `<EXP>_<animal>`, for example `CC_H02`. So
+the name of each output file tells its experiment. The dataset files start
+with the CellReg names `cellRegistered_` and `logFile_`, so scripts that look
+for `cellRegistered*.mat` also find the batch results.
+
+Each run overwrites `<EXP>_batch_config.json`, `<EXP>_batch_results.csv`,
+`<EXP>_batch_warnings_detail.csv`, `<EXP>_match_statistics.csv` and
+`<EXP>_batch_warnings.png`.
 
 **The tables cover the whole output folder.** A run of some datasets keeps
 the other datasets of earlier runs in the tables and in the figure. The batch
-takes their results from `_batch_results.mat`. A dataset whose folder you
+takes their results from `<EXP>_batch_results.mat`. A dataset whose folder you
 deleted is left out. The log lists the datasets from earlier runs, and warns
 if they were registered with other settings. The batch comparison of
 `low_match` then also uses them. To start again from nothing, delete the
@@ -489,13 +520,13 @@ file is open in another program (for example Excel), the batch tries again 3
 times. Then it writes a copy with a
 time stamp in the name and gives a MATLAB warning.
 
-### 5.1 `_batch_results.csv`
+### 5.1 `<EXP>_batch_results.csv`
 
 | Column | Meaning |
 |---|---|
 | `dataset_id` | Dataset name. |
 | `n_sessions` | Number of sessions of the dataset. |
-| `missing_sessions` | Session names of the batch that the dataset does not have (1.5). Empty if none. |
+| `missing_sessions` | Names of the zero columns of the dataset's cell map (1.5). Empty if there are none or if the batch cannot tell them. |
 | `n_cells` | Number of registered cells: rows of `cell_to_index_map`. A cell found in any session counts once. |
 | `pct_in_all` | Registered cells found in all sessions ÷ `n_cells`, in percent. |
 | `pct_in_all_of_mean` | Registered cells found in all sessions ÷ mean cells per session, in percent. This is **Match %** in the GUI. See 7.2. |
@@ -516,7 +547,7 @@ A failed dataset has a message in `error`, `n_cells` = 0 and all warning
 columns 0. **For a failed dataset, 0 does not mean "no problem".** The batch
 does not compute warnings for failed datasets.
 
-### 5.2 `_batch_warnings_detail.csv`
+### 5.2 `<EXP>_batch_warnings_detail.csv`
 
 One row for each rule that fired. One warning can have more than one row, for
 example `alignment` with a low cross-correlation and a large shift.
@@ -531,7 +562,7 @@ example `alignment` with a low cross-correlation and a large shift.
 | `threshold` | The limit that `value` crossed, in the same units. |
 | `severity` | `yellow` or `red`. |
 
-### 5.3 `_match_statistics.csv`
+### 5.3 `<EXP>_match_statistics.csv`
 
 One row per dataset that did not fail. The columns count the registered cells
 by the number of sessions they were found in.
@@ -539,16 +570,16 @@ by the number of sessions they were found in.
 | Column | Meaning |
 |---|---|
 | `dataset_id`, `n_sessions` | Dataset name and number of sessions. |
-| `missing_sessions` | As in `_batch_results.csv`. |
-| `n_cells` | Number of registered cells, as in `_batch_results.csv`. |
+| `missing_sessions` | As in `<EXP>_batch_results.csv`. |
+| `n_cells` | Number of registered cells, as in `<EXP>_batch_results.csv`. |
 | `in_S_sessions` … `in_1_sessions` | Number of registered cells found in exactly k sessions. S is the largest number of sessions in the batch. For a dataset with fewer sessions, the columns above its own number are empty: its "all sessions" count is in its own column. |
 | `mean_cells_per_session` | Mean number of cells per session. |
-| `pct_in_all` | As in `_batch_results.csv`, in percent. |
-| `pct_in_all_of_mean` | As in `_batch_results.csv`, in percent. |
+| `pct_in_all` | As in `<EXP>_batch_results.csv`, in percent. |
+| `pct_in_all_of_mean` | As in `<EXP>_batch_results.csv`, in percent. |
 
 Section 7.2 compares the two percentages.
 
-### 5.4 `_batch_warnings.png`
+### 5.4 `<EXP>_batch_warnings.png`
 
 ![Warnings figure](images/batch_warnings.png)
 
@@ -580,9 +611,9 @@ dataset.
 
 - `<dataset>_cellmap.csv`, in the output folder: the cell map
   (`cell_to_index_map`, see 7.1) as a CSV file without a header. Each row is
-  one registered cell. Each column is one session name of the batch, in
-  session order (1.5). `_cellmap_columns.txt` (one name per line), the log
-  line `cell map columns` and `summary.session_names` list the columns. The value is the number of the
+  one registered cell. Each column is one session, in session order (1.5).
+  `<EXP>_cellmap_columns.txt` (one name per line), the log line `cell map
+  columns` and `summary.session_names` give the column names. The value is the number of the
   cell in the input file of that session, counted from 1. 0 = not found. A
   missing session is a column of zeros.
 - `cellRegistered_*.mat`: the CellReg registration result (7.1). It has the
@@ -590,8 +621,9 @@ dataset.
 - `logFile_*.txt`: the CellReg log file, written by CellReg's
   `save_log_file` in the same format as the CellReg GUI: parameters, number of cells, FPR, FNR, scores, model error.
 - `Figures/`: the CellReg figures of stages 1–5, as `.fig` and `.png`. The
-  file names are CellReg's, for example `Stage 2 - pre vs post alignment` and
-  `Stage 3 - model`. The non-rigid mode adds `Stage 1 - Non-rigid
+  file names are the dataset name and CellReg's figure name, for example
+  `CC_H02_Stage 2 - pre vs post alignment.png` and `CC_H02_Stage 3 -
+  model.png`. The non-rigid mode adds `Stage 1 - Non-rigid
   transformations`. If a figure fails, the batch writes a `WARN` line to the
   log and continues.
 
@@ -682,7 +714,7 @@ Python, use `h5py` and transpose the map:
 
 ```python
 import h5py
-with h5py.File('cellRegistered_20261029_154458.mat', 'r') as f:
+with h5py.File('cellRegistered_CC_H02_20261029_154458.mat', 'r') as f:
     cell_map = f['cell_registered_struct']['cell_to_index_map'][()].T   # cells x sessions
 ```
 The other fields (`cell_scores`, `p_same_registered_pairs`,
@@ -694,8 +726,8 @@ User Manual.
 `pct_in_all` divides the cells found in all sessions by the number of
 registered cells. `pct_in_all_of_mean` divides them by the mean number of
 cells per session. The second value is larger. It is the lab's "matching %"
-and the **Match %** of the GUI. `_batch_results.csv` and
-`_match_statistics.csv` give both, in percent. To compute them from the map:
+and the **Match %** of the GUI. `<EXP>_batch_results.csv` and
+`<EXP>_match_statistics.csv` give both, in percent. To compute them from the map:
 
 ```matlab
 in_all      = sum(all(map > 0, 2));
@@ -742,14 +774,13 @@ macOS, and MATLAB R2021a on Linux. The GUI is not tested there.
 
 ## 9. Known limitations
 
-- **Names.** The animal ID must have 1–2 letters and exactly 2 digits. The
-  session number has one digit, so a dataset can have at most 9 day sessions
-  (`1D`–`9D`).
+- **Names.** The file names must follow the pattern of 1.2. The batch has
+  no setting for other patterns: rename the files.
 - **Fixed approach.** The registration approach is always probabilistic.
   You can choose the model (4.4), but not the simple-threshold approach. Use
   the CellReg GUI (`GUI/CellReg.m`) for one dataset when you need it.
-- **Session order.** The batch sorts the sessions by file name (1.3). To
-  change the order, rename the files.
+- **Session order.** The batch sorts the sessions by name (1.3). To change
+  the order, rename the files.
 - **Model choice in CellReg v1.6.0.** In `CellReg/choose_best_model.m`, lines
   28–29 compute the false positives and false negatives of the
   centroid-distance model at `ind_05_correlation` (the index of the

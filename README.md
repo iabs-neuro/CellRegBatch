@@ -63,9 +63,9 @@ flowchart TD
     S3["CellReg stage 3: probabilistic model<br/>CellReg picks centroid-distance or spatial-correlation model"]
     PS["Choose P_same: 0.5, or higher if FPR > 0.03"]
     S45["CellReg stages 4-5: initial registration, clustering"]
-    OUT1["Per dataset: cellRegistered_*.mat, logFile_*.txt, figures"]
+    OUT1["Per dataset: cellRegistered_ID_*.mat, logFile_ID_*.txt, figures"]
     AN["After all datasets: six quality warnings"]
-    OUT2["Per batch: _batch_results.csv, _match_statistics.csv,<br/>cell maps, warnings table and figure, log, config"]
+    OUT2["Per batch: EXP_batch_results.csv, EXP_match_statistics.csv,<br/>cell maps, warnings table and figure, log, config"]
     IN --> SCAN --> S12 --> CHK
     CHK -->|"no: next mode<br/>Translations, Rotations ±5°, ±90°, Non-rigid"| S12
     CHK -->|yes| S3 --> PS --> S45 --> OUT1
@@ -124,7 +124,9 @@ One `.mat` file per session. The first variable in the file is the array of
 spatial footprints, size N×Y×X (cells × height × width). This is the CellReg
 input format. File names must follow the pattern
 `<EXPERIMENT>_<ANIMAL>_<SESSION>...mat`, for example `CC_H02_1D_filters.mat`.
-The [Manual](Docs/MANUAL.md#1-input-files) gives the exact rule. The `Helper`
+Each part has letters and digits only, and `_` separates the parts. Rename
+files that follow another pattern. The
+[Manual](Docs/MANUAL.md#1-input-files) gives the exact rule. The `Helper`
 folder has CellReg's converters from Suite2p, CNMF-E and Inscopix outputs.
 
 ## The original CellReg tools are still here

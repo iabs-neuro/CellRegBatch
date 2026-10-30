@@ -97,10 +97,12 @@ copies with such names.
 
 10. Click **Open output folder**. Open `DEMO_M01\Figures` and look at these
     CellReg figures:
-    - `Stage 2 - pre vs post alignment.png`: the sessions before and after
-      alignment.
-    - `Stage 3 - model.png`: the model curves and the data histograms.
-    - `Stage 5 - projcetions - final registration.png`: the registered cells.
+    - `DEMO_M01_Stage 2 - pre vs post alignment.png`: the sessions before
+      and after alignment.
+    - `DEMO_M01_Stage 3 - model.png`: the model curves and the data
+      histograms.
+    - `DEMO_M01_Stage 5 - projcetions - final registration.png`: the
+      registered cells.
 
     The CellReg User Manual explains each figure. The CellReg results for the
     same data, made with the CellReg settings, are in
@@ -135,13 +137,14 @@ of sessions.
    - `CC_H02_1D.mat`, `CC_H02_2D.mat`, … (experiment `CC`, animal `H02`)
    - `NOF_F07_1D_filters.mat` (text after the session is ignored)
 
-   The animal ID has 1–2 letters and exactly 2 digits. The session has 1
-   digit and `D` or `T`. [Manual, section 1.2](MANUAL.md#12-file-names) gives
-   the full rule.
+   Each part has Latin letters and digits only, any number of them. `_`
+   separates the parts. If your files have other names, rename them.
+   [Manual, section 1.2](MANUAL.md#12-file-names) gives the full rule.
 3. Put the files of all animals of one experiment in one folder. Do not use
    subfolders: the batch does not read them.
-4. Check the session order. The batch sorts the files of each animal by
-   name. The first session is the reference session. To change the order,
+4. Check the session order. The batch sorts the sessions of each animal by
+   name, numbers by value (`2D` before `10D`). The first session is the
+   reference session. To change the order,
    rename the files.
 5. If an animal has no file for a session, do not make an empty file. The
    batch matches the sessions that the animal has and marks the missing ones
@@ -161,7 +164,7 @@ of sessions.
    to see what it means.
 5. Click **Save config as...** and keep the file with your experiment. Next
    time, click **Load config...** to use the same settings. Each batch also
-   saves its config as `_batch_config.json` in the output folder. The config
+   saves its config as `<EXP>_batch_config.json` in the output folder. The config
    also holds **Expected sessions per mouse** from the **Setup** tab.
 
 ## Part 5. Run the batch
@@ -173,8 +176,8 @@ output folder. To keep old results, copy them to another folder first.
 2. Click **Scan**.
 3. Set **Expected sessions per mouse** to the number of sessions of your
    experiment.
-4. Read the line under it. It lists the session names of the folder and how
-   many animals do not have the expected number.
+4. Read the line under it. It lists the cell map columns and how many
+   animals do not have the expected number of sessions.
 5. Check the table:
    - **Check** is `OK` for each animal. A red cell says what is different,
      for example `4 of 5: no 3D`;
@@ -214,7 +217,7 @@ flowchart TD
 ```
 
 Start with the picture of the whole batch: click **Warnings figure**, or open
-`_batch_warnings.png` in the output folder. The grid on the left shows the
+`<EXP>_batch_warnings.png` in the output folder. The grid on the left shows the
 warnings of each animal. The panels on the right show the values and the
 limits.
 
@@ -234,7 +237,7 @@ Then open the dataset folder and the figure for each red warning:
 | Low match | `Stage 2 - pre vs post alignment`, `Stage 5 - projcetions - final registration` | If the detail names a session: does it show the same field of view as the others? Else: are few cells tracked across all sessions? Look for one of the causes above. |
 
 [Manual, section 6](MANUAL.md#6-quality-warnings) gives the exact rule of
-each warning. For each fired rule, `_batch_warnings_detail.csv` gives the
+each warning. For each fired rule, `<EXP>_batch_warnings_detail.csv` gives the
 session, the value and the limit. Click a warning cell in the GUI to see the
 same text.
 
@@ -274,17 +277,17 @@ The output folder also has two tables for the whole batch:
   a CSV file. Use it in Python, R or Excel. All maps of a batch have one
   column for each session name of the folder. A missing session is a column
   of zeros.
-- `_match_statistics.csv`: for each animal, the number of cells found in all
+- `<EXP>_match_statistics.csv`: for each animal, the number of cells found in all
   sessions, in all sessions but one, and so on down to one session. It also
   gives two percentages of tracked cells.
-  [Manual, section 5.3](MANUAL.md#53-_match_statisticscsv) explains the
+  [Manual, section 5.3](MANUAL.md#53-exp_match_statisticscsv) explains the
   columns.
 
 ## Part 8. Look at an earlier batch again
 
 1. Start the GUI.
 2. On the **Run & Results** tab, click **Load results CSV...**.
-3. Select `_batch_results.csv` in the output folder.
+3. Select `<EXP>_batch_results.csv` in the output folder.
 
 The table shows the results and the warnings again.
 
@@ -295,10 +298,10 @@ The table shows the results and the warnings again.
 | **Unparsed files** is more than 0 | Some file names do not match the rule. | Rename the files (Part 3). |
 | An animal has **Run** cleared after **Scan** | It has fewer than 2 sessions, or two files with the same session. | Read the log. See [Manual, section 1.4](MANUAL.md#14-datasets-that-are-skipped). |
 | A red **Check** cell after **Scan** | The animal has another number of sessions than **Expected sessions per mouse**. | Check the file names. Keep **Run** to match it with a red **Sessions** warning, or clear **Run**. |
-| The session line lists more session names than expected | Animals use different session names, for example `1D` and `1T`. | Rename the files so that all animals use the same session names. |
+| **Check** says `cannot tell which is missing` | The animal has fewer sessions, and its session names differ from those of the other animals. | Rename its files to the session names of the other animals. Else the zero columns of its cell map are the last ones. |
 | **Load results CSV...** says "older version" | The file was made before the warnings review. | Run the batch again. |
 | A script run ends with 0 datasets and the warning `No dataset found` | No file name matches the rule. The log lists the files. | Rename the files (Part 3). |
-| A file `_batch_results_<time>.csv` appears | `_batch_results.csv` was open in another program. | Close the file in Excel before you run the batch. |
+| A file `<EXP>_batch_results_<time>.csv` appears | `<EXP>_batch_results.csv` was open in another program. | Close the file in Excel before you run the batch. |
 | An error about `gcp` or `parpool` | The Parallel Computing Toolbox is not installed. | Clear **Use parallel processing**. |
 | MATLAB runs out of memory | Each parallel worker keeps its own data. | Run `parpool(4)` first, or clear **Use parallel processing**. |
 | The GUI does not respond after a file dialog | The dialog window took the focus. | Click the GUI window. |
